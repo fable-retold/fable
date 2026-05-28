@@ -192,7 +192,7 @@ class Fable extends libFableServiceBase.CoreServiceProviderBase
 
 		if ((!(pServiceType in this.servicesMap)) || (!(pServiceType in this.fable)))
 		{
-			return this.instantiateServiceProvider(pServiceType, {}, `${pServiceType}-Default`);
+			return this.instantiateServiceProvider(pServiceType, pOptions, `${pServiceType}-Default`);
 		}
 		else
 		{

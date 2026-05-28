@@ -186,6 +186,18 @@ suite
 							);
 						test
 							(
+								'addAndInstantiateSingletonService forwards options to the constructor',
+								function ()
+								{
+									let testFable = new libFable({});
+
+									let tmpService = testFable.addAndInstantiateSingletonService('SimpleService', { SomeOption: true }, SimpleService);
+
+									Expect(tmpService.options.SomeOption).to.equal(true);
+								}
+							);
+						test
+							(
 								'Change the default service provider',
 								function ()
 								{
