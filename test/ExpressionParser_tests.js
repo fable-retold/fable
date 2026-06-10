@@ -2447,3 +2447,92 @@ suite
 				);
 		}
 	);
+
+suite('ExpressionParser Numeric Validity Functions', function()
+{
+	test('ISNUMERIC distinguishes real numbers (including zero) from dirty values', function()
+	{
+		let testFable = new libFable();
+		let _Parser = testFable.instantiateServiceProviderIfNotExists('ExpressionParser');
+		const fSolve = (pValue) => _Parser.solve('R = ISNUMERIC(Record.A)', { Record: { A: pValue } }, {}, testFable.manifest, {});
+		Expect(fSolve('6.9')).to.equal('1');
+		Expect(fSolve('0')).to.equal('1', 'a real zero reading is numeric');
+		Expect(fSolve('-12.5')).to.equal('1');
+		Expect(fSolve('')).to.equal('0');
+		Expect(fSolve('   ')).to.equal('0');
+		Expect(fSolve('Enter Dry and Wet Weights')).to.equal('0', 'placeholder text is not numeric');
+		Expect(fSolve(null)).to.equal('0');
+		Expect(fSolve(undefined)).to.equal('0');
+	});
+
+	test('TONUMBER coerces with an explicit fallback for dirty values', function()
+	{
+		let testFable = new libFable();
+		let _Parser = testFable.instantiateServiceProviderIfNotExists('ExpressionParser');
+		const fSolve = (pValue, pFallback) => _Parser.solve(`R = TONUMBER(Record.A, ${pFallback})`, { Record: { A: pValue } }, {}, testFable.manifest, {});
+		Expect(fSolve('6.9', 0)).to.equal('6.9');
+		Expect(fSolve('0', 0)).to.equal('0');
+		Expect(fSolve('', 0)).to.equal('0');
+		Expect(fSolve('not a number', 0)).to.equal('0');
+		Expect(fSolve('', -1)).to.equal('-1', 'the fallback is honored');
+	});
+
+	test('the functions compose into indicator expressions', function()
+	{
+		let testFable = new libFable();
+		let _Parser = testFable.instantiateServiceProviderIfNotExists('ExpressionParser');
+		// "a real sample has an oven OR a meter reading" — the skip-row rule as an indicator column.
+		const fSolve = (pO, pM) => _Parser.solve('R = (ISNUMERIC(Record.O) + ISNUMERIC(Record.M)) >= 1', { Record: { O: pO, M: pM } }, {}, testFable.manifest, {});
+		Expect(fSolve('6.9', '')).to.equal('1');
+		Expect(fSolve('', '3.1')).to.equal('1');
+		Expect(fSolve('', 'Enter Dry and Wet Weights')).to.equal('0');
+		Expect(_Parser.solve('R = ABS(TONUMBER(Record.D, 0))', { Record: { D: '-1.5' } }, {}, testFable.manifest, {})).to.equal('1.5');
+	});
+
+	test('isNumeric and toNumber are exposed directly on the Math service', function()
+	{
+		let testFable = new libFable();
+		testFable.instantiateServiceProviderIfNotExists('Math');
+		Expect(testFable.Math.isNumeric('42')).to.equal('1');
+		Expect(testFable.Math.isNumeric('')).to.equal('0');
+		Expect(testFable.Math.toNumber('x', 7)).to.equal('7');
+		Expect(testFable.Math.toNumber(' 3.5 ')).to.equal('3.5');
+	});
+
+	test('TONUMBER preserves arbitrary precision — numeric strings flow VERBATIM', function()
+	{
+		let testFable = new libFable();
+		testFable.instantiateServiceProviderIfNotExists('Math');
+		// A float round-trip would collapse all of these.
+		Expect(testFable.Math.toNumber('0.123456789012345678901234567890123'))
+			.to.equal('0.123456789012345678901234567890123', 'long mantissa keeps every digit');
+		Expect(testFable.Math.toNumber('900719925474099312345678901'))
+			.to.equal('900719925474099312345678901', 'integers beyond 2^53 are untouched');
+		Expect(testFable.Math.toNumber('1.500')).to.equal('1.500', 'trailing zeros are significant and kept');
+		Expect(testFable.Math.toNumber('-0.000000000000000000001')).to.equal('-0.000000000000000000001');
+		Expect(testFable.Math.toNumber('1e400')).to.equal('1e400', 'exponents beyond float range are still numeric');
+	});
+
+	test('ISNUMERIC classifies by decimal grammar, not float round-trip', function()
+	{
+		let testFable = new libFable();
+		let _Parser = testFable.instantiateServiceProviderIfNotExists('ExpressionParser');
+		const fSolve = (pValue) => _Parser.solve('R = ISNUMERIC(Record.A)', { Record: { A: pValue } }, {}, testFable.manifest, {});
+		Expect(fSolve('1e400')).to.equal('1', 'beyond float range but a valid precise number');
+		Expect(fSolve('900719925474099312345678901')).to.equal('1');
+		Expect(fSolve('1.5e-10')).to.equal('1');
+		Expect(fSolve('+12.5')).to.equal('1');
+		Expect(fSolve('.5')).to.equal('1');
+		Expect(fSolve('1.2.3')).to.equal('0');
+		Expect(fSolve('Infinity')).to.equal('0', 'not a decimal big.js can parse');
+		Expect(fSolve('0x1F')).to.equal('0', 'hex is not in the precise-math grammar');
+	});
+
+	test('high-precision values survive a TONUMBER pass through the parser', function()
+	{
+		let testFable = new libFable();
+		let _Parser = testFable.instantiateServiceProviderIfNotExists('ExpressionParser');
+		Expect(_Parser.solve('R = TONUMBER(Record.A, 0)', { Record: { A: '0.12345678901234567890123456789' } }, {}, testFable.manifest, {}))
+			.to.equal('0.12345678901234567890123456789');
+	});
+});

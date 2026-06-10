@@ -326,6 +326,59 @@ class FableServiceMath extends libFableServiceBase
 	}
 
 	/**
+	 * Tests whether a value is a numeric decimal string (after trimming).
+	 * Empty strings, whitespace, non-numeric text, null and undefined are NOT
+	 * numeric; '0' IS. Returns the strings '1' / '0' so the result composes
+	 * with the expression grammar's comparison-style truth values.
+	 *
+	 * Validity is tested with a decimal grammar (sign, digits, optional
+	 * fraction, optional exponent) rather than a float round-trip, so
+	 * arbitrary-precision values — long mantissas, integers past 2^53,
+	 * exponents beyond float range — classify correctly for the string-based
+	 * precise math this service does.
+	 *
+	 * @param {*} pValue - The value to test.
+	 * @returns {string} '1' when numeric, '0' otherwise.
+	 */
+	isNumeric(pValue)
+	{
+		if (pValue === null || pValue === undefined)
+		{
+			return '0';
+		}
+		const tmpString = String(pValue).trim();
+		if (tmpString === '')
+		{
+			return '0';
+		}
+		return /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(tmpString) ? '1' : '0';
+	}
+
+	/**
+	 * Validates a value as numeric, with an explicit fallback for anything
+	 * that is not (empty strings, text placeholders, null). The numeric
+	 * counterpart to isNumeric — together they express "skip or zero-fill
+	 * dirty readings while still counting real zeroes".
+	 *
+	 * PRECISION CONTRACT: when the value IS numeric, the original (trimmed)
+	 * string is returned VERBATIM — never round-tripped through a float — so
+	 * arbitrary-precision values flow into the precise math untouched
+	 * ('1.500' stays '1.500'; 25-digit mantissas keep every digit).
+	 *
+	 * @param {*} pValue - The value to validate.
+	 * @param {number|string} [pFallback=0] - Returned when pValue is not numeric.
+	 * @returns {string} The original numeric string (or the fallback) as a string.
+	 */
+	toNumber(pValue, pFallback)
+	{
+		if (this.isNumeric(pValue) === '0')
+		{
+			return (pFallback === undefined || pFallback === null) ? '0' : String(pFallback);
+		}
+		return String(pValue).trim();
+	}
+
+	/**
 	 * Calculates the floor of a number precisely.
 	 *
 	 * @param {string|number} pValue - The number to calculate the floor value of.

@@ -525,5 +525,13 @@
 	"generateguid": {
 		"Name": "Generate a GUID string",
 		"Address": "fable.getUUID"
+	},
+	"isnumeric": {
+		"Name": "Is Numeric (1/0; trims strings, empty/text are not numeric)",
+		"Address": "fable.Math.isNumeric"
+	},
+	"tonumber": {
+		"Name": "To Number (with fallback for non-numeric values)",
+		"Address": "fable.Math.toNumber"
 	}
 }
