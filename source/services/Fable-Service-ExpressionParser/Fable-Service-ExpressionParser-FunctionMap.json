@@ -533,5 +533,21 @@
 	"tonumber": {
 		"Name": "To Number (with fallback for non-numeric values)",
 		"Address": "fable.Math.toNumber"
+	},
+	"aggregationjoinbyobject": {
+		"Name": "Collect (join) per-key string values by Exact Value from Object Property",
+		"Address": "fable.Math.histogramAggregationJoinByExactValue"
+	},
+	"dateformat": {
+		"Name": "Format a Date with dayjs tokens in a timezone (explicit param, else the configured default)",
+		"Address": "fable.Dates.formatDate"
+	},
+	"chartticks": {
+		"Name": "Compute readable chart axis tick labels (sparse same-length array) from a dense value set",
+		"Address": "fable.Math.chartTickLabels"
+	},
+	"setdensity": {
+		"Name": "Analyze ordered-set density: natural boundaries (calendar units / nice numeric steps / positions) fitting a budget",
+		"Address": "fable.Math.analyzeSetDensity"
 	}
 }

@@ -5,15 +5,15 @@ Joins array elements into a string with a specified separator.
 ## Syntax
 
 ```
-join(array, separator)
+join(separator, array)
 ```
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `array` | Array | The array of values to join |
 | `separator` | String | The separator to place between elements |
+| `array` | Array | The array of values to join |
 
 ## Returns
 

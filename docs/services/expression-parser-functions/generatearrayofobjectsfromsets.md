@@ -5,15 +5,15 @@ Generates an array of objects from parallel arrays.
 ## Syntax
 
 ```
-generatearrayofobjectsfromsets(keys, valueArrays)
+generatearrayofobjectsfromsets(name1, array1, name2, array2, ...)
 ```
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `keys` | Array | Array of property names |
-| `valueArrays` | Array | Array of value arrays |
+| `name1, name2, ...` | String | Property name for each following array |
+| `array1, array2, ...` | Array | Parallel value arrays (zipped by index) |
 
 ## Returns
 

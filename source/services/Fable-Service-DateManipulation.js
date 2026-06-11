@@ -288,6 +288,38 @@ class DateManipulation extends libFableServiceProviderBase
 		}
 	}
 
+	/**
+	 * Format a date value with dayjs format tokens, rendered in a timezone.
+	 *
+	 * Timezone resolution: the explicit parameter wins; otherwise the
+	 * dayjs default set via `dayJS.tz.setDefault(...)` (the host
+	 * application's configured timezone — e.g. pict apps set this to the
+	 * document's project timezone); otherwise the host's local zone.
+	 *
+	 * @param {string|number|Date} pDateValue - ISO string, epoch millis, or Date
+	 * @param {string} pFormat - dayjs format tokens (e.g. 'YYYY-MM-DD h:mm A')
+	 * @param {string} [pTimezone] - optional IANA zone override (e.g. 'America/Chicago')
+	 * @return {string|undefined} the formatted string, or undefined on an unparseable value
+	 */
+	formatDate(pDateValue, pFormat, pTimezone)
+	{
+		try
+		{
+			let tmpDate = this.dayJS(pDateValue);
+			if (!tmpDate.isValid())
+			{
+				return undefined;
+			}
+			let tmpFormat = (typeof (pFormat) === 'string' && pFormat.length > 0) ? pFormat : 'YYYY-MM-DD HH:mm:ss';
+			tmpDate = (typeof (pTimezone) === 'string' && pTimezone.length > 0) ? tmpDate.tz(pTimezone) : tmpDate.tz();
+			return tmpDate.format(tmpFormat);
+		}
+		catch (pError)
+		{
+			return undefined;
+		}
+	}
+
 	dateFromParts(pYear, pMonth, pDay, pHour = 0, pMinute = 0, pSecond = 0, pMillisecond = 0)
 	{
 		try

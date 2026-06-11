@@ -1,6 +1,6 @@
 # countsetelements
 
-Counts unique elements in a set/array.
+Counts the elements in a set/array (its length), the keys of an object, or 1/0 for scalars. It does NOT deduplicate — for a distinct count, compose with `distributionhistogram`: `COUNTSETELEMENTS(DISTRIBUTIONHISTOGRAM(set))`.
 
 ## Syntax
 

@@ -1140,15 +1140,19 @@ class FableServiceMath extends libFableServiceBase
 			return pValueObjectSet;
 		}
 
-		if (!pValueAddress)
-		{
-			return {};
-		}
-
 		let tmpHistogram = {};
 		for (let i = 0; i < pValueObjectSet.length; i++)
 		{
-			let tmpValue = this.fable.Utility.getValueByHash(pValueObjectSet[i], pValueAddress, pManifest).toString();
+			// Without a value address, the set elements themselves are counted
+			// (plain value sets); with one, count the addressed property.
+			let tmpRawValue = pValueAddress
+				? this.fable.Utility.getValueByHash(pValueObjectSet[i], pValueAddress, pManifest)
+				: pValueObjectSet[i];
+			if (tmpRawValue === undefined || tmpRawValue === null)
+			{
+				continue;
+			}
+			let tmpValue = tmpRawValue.toString();
 
 			if (!(tmpValue in tmpHistogram))
 			{
@@ -1167,6 +1171,13 @@ class FableServiceMath extends libFableServiceBase
 			return {};
 		}
 
+		// The expression parser hands the resolved SET, not an address —
+		// delegate directly so DISTRIBUTIONHISTOGRAM(set) works.
+		if (Array.isArray(pValueObjectSetAddress))
+		{
+			return this.histogramDistributionByExactValue(pValueObjectSetAddress, pValueAddress);
+		}
+
 		let tmpValueObjectSet = this.fable.Utility.getInternalValueByHash(pValueObjectSetAddress);
 		return this.histogramDistributionByExactValue(tmpValueObjectSet, pValueAddress);
 	}
@@ -1176,6 +1187,206 @@ class FableServiceMath extends libFableServiceBase
 	 * @param {Array} pValueSet
 	 * @param {string} pValueAddress
 	 */
+	/**
+	 * Analyze the density of an ordered value set and find natural boundary
+	 * positions that fit a budget — the generic core behind axis ticks, HTML
+	 * group headers, timeline scrubbers, and any other "too many labels"
+	 * presentation problem.
+	 *
+	 * Domain handling:
+	 *  - Date-like sets: boundaries where values cross calendar units,
+	 *    using the finest unit (day, week, month, quarter, year) that fits
+	 *    the budget; labels formatted at the unit's natural grain.
+	 *  - Numeric sets: boundaries where values cross multiples of a "nice"
+	 *    step (1 / 2 / 2.5 / 5 x 10^k) chosen to fit the budget; labels are
+	 *    the crossed multiples.
+	 *  - Everything else (ordinal): uniform positional boundaries.
+	 *
+	 * Assumes the set is ordered (an axis/sequence); unordered input
+	 * degrades to ordinal handling.
+	 *
+	 * @param {Array} pValueSet - ordered values, one per position
+	 * @param {number} [pMaximumBoundaries=12] - boundary budget (clamped 2..100)
+	 * @return {{ SetType: string, Unit: string, Boundaries: Array<{Index: number, Value: any, Label: string}> }}
+	 */
+	analyzeSetDensity(pValueSet, pMaximumBoundaries)
+	{
+		let tmpBudget = parseInt(pMaximumBoundaries, 10);
+		tmpBudget = (isNaN(tmpBudget)) ? 12 : Math.max(2, Math.min(100, tmpBudget));
+		const tmpResult = { SetType: 'ordinal', Unit: 'position', Boundaries: [] };
+		if (!Array.isArray(pValueSet) || pValueSet.length < 1)
+		{
+			return tmpResult;
+		}
+		if (pValueSet.length <= tmpBudget)
+		{
+			tmpResult.Boundaries = pValueSet.map((pValue, pIndex) => (
+				{ Index: pIndex, Value: pValue, Label: (pValue === undefined || pValue === null) ? '' : pValue.toString() }));
+			return tmpResult;
+		}
+
+		const tmpNumbers = pValueSet.map((pValue) => this.parsePrecise(pValue, NaN));
+		const tmpIsNumericSet = tmpNumbers.every((pNumber) => !isNaN(pNumber));
+		const tmpDayJS = this.fable.Dates.dayJS;
+		const tmpIsDateSet = !tmpIsNumericSet && pValueSet.every((pValue) =>
+			(pValue !== undefined && pValue !== null && pValue !== '') && tmpDayJS(pValue.toString()).isValid());
+
+		if (tmpIsDateSet)
+		{
+			tmpResult.SetType = 'date';
+			const tmpUnitLadder =
+			[
+				{ Unit: 'day', Key: 'YYYY-MM-DD', Label: 'MMM D' },
+				{ Unit: 'week', Key: 'GGGG-WW', Label: 'MMM D' },
+				{ Unit: 'month', Key: 'YYYY-MM', Label: 'MMM YYYY' },
+				{ Unit: 'quarter', Key: 'YYYY-Q', Label: '[Q]Q YYYY' },
+				{ Unit: 'year', Key: 'YYYY', Label: 'YYYY' }
+			];
+			const tmpParsed = pValueSet.map((pValue) => tmpDayJS(pValue.toString()));
+			for (let u = 0; u < tmpUnitLadder.length; u++)
+			{
+				const tmpBucketKeys = tmpParsed.map((pDate) => pDate.format(tmpUnitLadder[u].Key));
+				const tmpDistinct = new Set(tmpBucketKeys).size;
+				if (tmpDistinct <= tmpBudget || u === tmpUnitLadder.length - 1)
+				{
+					tmpResult.Unit = tmpUnitLadder[u].Unit;
+					const tmpBoundaryStride = Math.max(1, Math.ceil(tmpDistinct / tmpBudget));
+					let tmpSeen = {};
+					let tmpBoundaryIndex = -1;
+					for (let i = 0; i < pValueSet.length; i++)
+					{
+						if (tmpBucketKeys[i] in tmpSeen) { continue; }
+						tmpSeen[tmpBucketKeys[i]] = true;
+						tmpBoundaryIndex++;
+						if (tmpBoundaryIndex % tmpBoundaryStride !== 0) { continue; }
+						tmpResult.Boundaries.push({ Index: i, Value: pValueSet[i], Label: tmpParsed[i].format(tmpUnitLadder[u].Label) });
+					}
+					return tmpResult;
+				}
+			}
+		}
+
+		if (tmpIsNumericSet)
+		{
+			tmpResult.SetType = 'number';
+			// Nice step: smallest of {1, 2, 2.5, 5} x 10^k giving <= budget
+			// boundary crossings over the value range.
+			const tmpMinimum = Math.min(...tmpNumbers);
+			const tmpMaximum = Math.max(...tmpNumbers);
+			const tmpRange = tmpMaximum - tmpMinimum;
+			if (tmpRange > 0)
+			{
+				const tmpRawStep = tmpRange / tmpBudget;
+				const tmpMagnitude = Math.pow(10, Math.floor(Math.log10(tmpRawStep)));
+				let tmpStep = 10 * tmpMagnitude;
+				for (const tmpNice of [ 1, 2, 2.5, 5 ])
+				{
+					if (tmpNice * tmpMagnitude >= tmpRawStep) { tmpStep = tmpNice * tmpMagnitude; break; }
+				}
+				tmpResult.Unit = `step:${tmpStep}`;
+				let tmpLastBucket = null;
+				for (let i = 0; i < pValueSet.length; i++)
+				{
+					const tmpBucket = Math.floor(tmpNumbers[i] / tmpStep);
+					if (tmpBucket === tmpLastBucket) { continue; }
+					tmpLastBucket = tmpBucket;
+					const tmpNiceValue = tmpBucket * tmpStep;
+					tmpResult.Boundaries.push({ Index: i, Value: pValueSet[i], Label: this.roundPrecise(tmpNiceValue, 6).toString() });
+				}
+				if (tmpResult.Boundaries.length <= tmpBudget)
+				{
+					return tmpResult;
+				}
+				// Non-monotonic data can cross steps many times — degrade.
+				tmpResult.Boundaries = [];
+			}
+		}
+
+		// Ordinal: uniform positional stride.
+		tmpResult.SetType = (tmpResult.SetType === 'ordinal') ? 'ordinal' : tmpResult.SetType;
+		tmpResult.Unit = 'position';
+		const tmpStride = Math.ceil(pValueSet.length / tmpBudget);
+		for (let i = 0; i < pValueSet.length; i += tmpStride)
+		{
+			tmpResult.Boundaries.push({ Index: i, Value: pValueSet[i], Label: (pValueSet[i] === undefined || pValueSet[i] === null) ? '' : pValueSet[i].toString() });
+		}
+		return tmpResult;
+	}
+
+	/**
+	 * Chart-shaped projection of analyzeSetDensity: a sparse label array of
+	 * the SAME LENGTH as the input ('' at non-boundary positions), dropping
+	 * directly into a category chart's labels with alignment preserved.
+	 *
+	 * @param {Array} pValueSet
+	 * @param {number} [pMaximumTicks=12]
+	 * @return {Array<string>}
+	 */
+	chartTickLabels(pValueSet, pMaximumTicks)
+	{
+		if (!Array.isArray(pValueSet))
+		{
+			return pValueSet;
+		}
+		const tmpAnalysis = this.analyzeSetDensity(pValueSet, pMaximumTicks);
+		const tmpLabels = new Array(pValueSet.length).fill('');
+		for (const tmpBoundary of tmpAnalysis.Boundaries)
+		{
+			tmpLabels[tmpBoundary.Index] = tmpBoundary.Label;
+		}
+		return tmpLabels;
+	}
+
+	/**
+	 * Collect (join) per-key string values from a set of objects — the
+	 * string-valued sibling of histogramAggregationByExactValue. Returns an
+	 * insertion-ordered { key: "v1<separator>v2..." } object, so
+	 * OBJECTKEYSTOARRAY / OBJECTVALUESTOARRAY produce aligned parallel
+	 * arrays. Values join verbatim (no numeric coercion); undefined/null
+	 * values are skipped.
+	 *
+	 * @param {Array} pValueObjectSet
+	 * @param {string} pValueAddress - address of the grouping key on each object
+	 * @param {string} pValueJoinAddress - address of the value to collect
+	 * @param {string} pSeparator - separator placed between collected values
+	 * @param {object} pManifest
+	 * @return {Object<string, string>}
+	 */
+	histogramAggregationJoinByExactValue(pValueObjectSet, pValueAddress, pValueJoinAddress, pSeparator, pManifest)
+	{
+		if (!Array.isArray(pValueObjectSet))
+		{
+			return pValueObjectSet;
+		}
+
+		if (!pValueAddress || !pValueJoinAddress)
+		{
+			return {};
+		}
+
+		let tmpSeparator = (typeof (pSeparator) === 'string') ? pSeparator : ',';
+		let tmpHistogram = {};
+		for (let i = 0; i < pValueObjectSet.length; i++)
+		{
+			let tmpKey = this.fable.Utility.getValueByHash(pValueObjectSet[i], pValueAddress, pManifest);
+			if (tmpKey === undefined || tmpKey === null)
+			{
+				continue;
+			}
+			tmpKey = tmpKey.toString();
+			let tmpValue = this.fable.Utility.getValueByHash(pValueObjectSet[i], pValueJoinAddress, pManifest);
+			if (tmpValue === undefined || tmpValue === null)
+			{
+				continue;
+			}
+			tmpHistogram[tmpKey] = (tmpKey in tmpHistogram)
+				? tmpHistogram[tmpKey] + tmpSeparator + tmpValue.toString()
+				: tmpValue.toString();
+		}
+
+		return tmpHistogram;
+	}
+
 	histogramAggregationByExactValue(pValueObjectSet, pValueAddress, pValueAmountAddress, pManifest)
 	{
 		if (!Array.isArray(pValueObjectSet))

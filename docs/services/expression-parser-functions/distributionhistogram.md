@@ -1,7 +1,10 @@
 # distributionhistogram
 
-Generates a histogram counting occurrences of each unique value.
-
+Counts occurrences of each value in a plain set/array (`uniq -c`): returns
+an insertion-ordered `{ value: count }` object. `OBJECTKEYSTOARRAY` of the
+result is the set's distinct values; `COUNTSETELEMENTS` of it is the
+distinct count. For sets of objects, use `distributionhistogrambyobject`
+with a value address.
 ## Syntax
 
 ```

@@ -1,12 +1,11 @@
 # sorthistogram
 
-Sorts a histogram object by its values.
+Sorts a histogram object by its values, ascending.
 
 ## Syntax
 
 ```
 sorthistogram(histogram)
-sorthistogram(histogram, descending)
 ```
 
 ## Parameters
@@ -14,57 +13,22 @@ sorthistogram(histogram, descending)
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `histogram` | Object | The histogram object to sort |
-| `descending` | Boolean | If true, sort in descending order (optional) |
 
 ## Returns
 
-Array - Array of [key, value] pairs sorted by value.
+Object - the same `{ key: value }` shape with keys re-inserted in
+ascending-value order (NOT an array of pairs). There is no descending
+flag.
 
-## Description
+## Descending / top-N recipe
 
-The `sorthistogram` function takes a histogram (object with keys and numeric values) and returns it as a sorted array of key-value pairs, ordered by the values.
+Sort is ascending-only and `MAP` cannot index pair structures, so for a
+"top N by count" presentation: carry a NEGATED measure alongside the real
+one, sort ascending over the negated values, then flip signs back:
 
-## Examples
-
-### Ascending Sort (Default)
-
-```expression
-// Given histogram: { 'A': 5, 'B': 2, 'C': 8 }
-Result = SORTHISTOGRAM(Histogram)
-// Result: [['B', 2], ['A', 5], ['C', 8]]
 ```
-
-### Descending Sort
-
-```expression
-Result = SORTHISTOGRAM(Histogram, true)
-// Result: [['C', 8], ['A', 5], ['B', 2]]
+NegSorted = SORTHISTOGRAM(AGGREGATIONHISTOGRAMBYOBJECT(Rows, "Material", "NegCount"))
+TopLabels = OBJECTKEYSTOARRAY(NegSorted)
+_negs = OBJECTVALUESTOARRAY(NegSorted)
+TopCounts = MAP VAR v FROM _negs : 0 - v
 ```
-
-### With Distribution Histogram
-
-```expression
-Distribution = DISTRIBUTIONHISTOGRAM("AppData.Orders", "status")
-SortedByCount = SORTHISTOGRAM(Distribution, true)
-// Most common statuses first
-```
-
-## Use Cases
-
-- **Rankings**: Rank categories by frequency
-- **Top N**: Find top categories
-- **Reports**: Ordered category lists
-- **Analysis**: Sorted distributions
-
-## Related Functions
-
-- [sorthistogrambykeys](./sorthistogrambykeys.md) - Sort by keys instead
-- [sortset](./sortset.md) - Sort simple arrays
-- [distributionhistogram](./distributionhistogram.md) - Create histogram
-- [aggregationhistogram](./aggregationhistogram.md) - Create aggregation histogram
-
-## Notes
-
-- Returns array of [key, value] pairs
-- Sorts by numeric value
-- Uses the Math service's `sortHistogram` method
