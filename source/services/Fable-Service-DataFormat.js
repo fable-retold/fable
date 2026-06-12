@@ -422,6 +422,49 @@ class DataFormat extends libFableServiceProviderBase
 	 * @param {*} pNumber
 	 * @returns {string}
 	 */
+	/**
+	 * Trim whitespace from both ends of a value (stringified first).
+	 * @param {any} pValue
+	 * @return {string}
+	 */
+	stringTrim (pValue)
+	{
+		return (pValue === undefined || pValue === null) ? '' : pValue.toString().trim();
+	}
+
+	/**
+	 * Trim trailing whitespace (e.g. SQL CHAR(n) padding).
+	 * @param {any} pValue
+	 * @return {string}
+	 */
+	stringTrimEnd (pValue)
+	{
+		return (pValue === undefined || pValue === null) ? '' : pValue.toString().replace(/\s+$/, '');
+	}
+
+	/**
+	 * Trim leading whitespace.
+	 * @param {any} pValue
+	 * @return {string}
+	 */
+	stringTrimStart (pValue)
+	{
+		return (pValue === undefined || pValue === null) ? '' : pValue.toString().replace(/^\s+/, '');
+	}
+
+	/**
+	 * Comma-group a numeric string for human reading, preserving the value
+	 * VERBATIM (no float round-trip — arbitrary-precision strings group
+	 * intact). Compose with TOFIXED for decimal control. Non-numeric
+	 * strings pass through unchanged; missing values return ''.
+	 * @param {any} pValue
+	 * @return {string}
+	 */
+	addCommasToValue (pValue)
+	{
+		return (pValue === undefined || pValue === null) ? '' : this.formatterAddCommasToNumber(pValue.toString());
+	}
+
 	formatterAddCommasToNumber (pNumber)
 	{
 		// If the regex doesn't match, `replace` returns the string unmodified
@@ -680,8 +723,8 @@ class DataFormat extends libFableServiceProviderBase
 
 		let tmpSeparator = (typeof(pSeparator) == 'string') ? pSeparator : '.';
 
-		let tmpEnclosureStartSymbolMap = (typeof(pEnclosureStartSymbolMap) == 'object') ? pEnclosureStart : { '{': 0, '[': 1, '(': 2 };
-		let tmpEnclosureEndSymbolMap = (typeof(pEnclosureEndSymbolMap) == 'object') ? pEnclosureEnd : { '}': 0, ']': 1, ')': 2 };
+		let tmpEnclosureStartSymbolMap = (typeof(pEnclosureStartSymbolMap) == 'object') ? pEnclosureStartSymbolMap : { '{': 0, '[': 1, '(': 2 };
+		let tmpEnclosureEndSymbolMap = (typeof(pEnclosureEndSymbolMap) == 'object') ? pEnclosureEndSymbolMap : { '}': 0, ']': 1, ')': 2 };
 
 		if (pString.length < 1)
 		{
@@ -735,8 +778,15 @@ class DataFormat extends libFableServiceProviderBase
 
 		let tmpSeparator = (typeof(pSeparator) == 'string') ? pSeparator : '.';
 
-		let tmpEnclosureStartSymbolMap = (typeof(pEnclosureStartSymbolMap) == 'object') ? pEnclosureStart : { '{': 0, '[': 1, '(': 2, '"':3, "'":4 };
-		let tmpEnclosureEndSymbolMap = (typeof(pEnclosureEndSymbolMap) == 'object') ? pEnclosureEnd : { '}': 0, ']': 1, ')': 2, '"':3, "'":4 };
+		// An empty-string enclosure argument disables enclosure handling
+		// entirely (plain split) — expressions cannot pass object literals.
+		if (pEnclosureStartSymbolMap === '')
+		{
+			pEnclosureStartSymbolMap = {};
+			pEnclosureEndSymbolMap = {};
+		}
+		let tmpEnclosureStartSymbolMap = (typeof(pEnclosureStartSymbolMap) == 'object') ? pEnclosureStartSymbolMap : { '{': 0, '[': 1, '(': 2, '"':3, "'":4 };
+		let tmpEnclosureEndSymbolMap = (typeof(pEnclosureEndSymbolMap) == 'object') ? pEnclosureEndSymbolMap : { '}': 0, ']': 1, ')': 2, '"':3, "'":4 };
 
 		let tmpCurrentSegmentStart = 0;
 		let tmpSegmentList = [];
@@ -798,8 +848,8 @@ class DataFormat extends libFableServiceProviderBase
 
 		let tmpSeparator = (typeof(pSeparator) == 'string') ? pSeparator : '.';
 
-		let tmpEnclosureStartSymbolMap = (typeof(pEnclosureStartSymbolMap) == 'object') ? pEnclosureStart : { '{': 0, '[': 1, '(': 2 };
-		let tmpEnclosureEndSymbolMap = (typeof(pEnclosureEndSymbolMap) == 'object') ? pEnclosureEnd : { '}': 0, ']': 1, ')': 2 };
+		let tmpEnclosureStartSymbolMap = (typeof(pEnclosureStartSymbolMap) == 'object') ? pEnclosureStartSymbolMap : { '{': 0, '[': 1, '(': 2 };
+		let tmpEnclosureEndSymbolMap = (typeof(pEnclosureEndSymbolMap) == 'object') ? pEnclosureEndSymbolMap : { '}': 0, ']': 1, ')': 2 };
 
 		if (pString.length < 1)
 		{

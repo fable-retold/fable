@@ -229,3 +229,66 @@ suite('SETDENSITY (the generic analyzer behind CHARTTICKS)', function ()
 		Expect(tmpSource.DWords.Boundaries[1].Index).to.equal(3, 'uniform stride');
 	});
 });
+
+suite('TRIM family and NUMBERFORMAT', function ()
+{
+	function getStringHarness()
+	{
+		let testFable = new libFable();
+		return { fable: testFable, parser: testFable.instantiateServiceProviderIfNotExists('ExpressionParser'), manifest: testFable.newManyfest() };
+	}
+
+	test('TRIM/RTRIM/LTRIM handle padding, quotes, and missing values', function ()
+	{
+		let tmpHarness = getStringHarness();
+		// The CHAR(48)-padded label case incl. an embedded quote — the
+		// segment-split rtrim workaround could never handle these.
+		let tmpSource = { Padded: '1/2" RAP                              ', Spaced: '  mid  ' };
+		tmpHarness.parser.solve('R = RTRIM(Padded)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		tmpHarness.parser.solve('T = TRIM(Spaced)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		tmpHarness.parser.solve('L = LTRIM(Spaced)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		Expect(tmpSource.R).to.equal('1/2" RAP');
+		Expect(tmpSource.T).to.equal('mid');
+		Expect(tmpSource.L).to.equal('mid  ');
+		tmpHarness.parser.solve('M = TRIM(Absent)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		Expect(tmpSource.M).to.equal('');
+	});
+
+	test('RTRIM works inside a MAP body (the per-label use case)', function ()
+	{
+		let tmpHarness = getStringHarness();
+		let tmpSource = { Labels: [ '4LT   ', 'Unknown', 'N50 12.5mm  FDL Airport (P401)   ' ] };
+		tmpHarness.parser.solve('Clean = MAP VAR v FROM Labels : RTRIM(v)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		Expect(tmpSource.Clean).to.deep.equal([ '4LT', 'Unknown', 'N50 12.5mm  FDL Airport (P401)' ], 'internal double space preserved');
+	});
+
+	test('ADDCOMMAS groups digits VERBATIM — arbitrary precision preserved, no float coercion', function ()
+	{
+		let tmpHarness = getStringHarness();
+		let tmpSource = { Big: '1234567.891', Huge: '123456789012345678901234567890', Tiny: '0.000000000001234' };
+		tmpHarness.parser.solve('A = ADDCOMMAS(Big)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		tmpHarness.parser.solve('D = ADDCOMMAS(Absent)', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		Expect(tmpSource.A).to.equal('1,234,567.891');
+		Expect(tmpSource.D).to.equal('');
+		// The FUNCTION is verbatim — arbitrary precision and sub-precision
+		// decimals group/pass intact at the service level. (Through the
+		// solver, the expression layer's own operand marshaling e-notates
+		// values outside float-friendly display range BEFORE any function
+		// sees them — a pre-existing parser behavior, pinned here so the
+		// boundary is explicit.)
+		Expect(tmpHarness.fable.DataFormat.addCommasToValue('123456789012345678901234567890'))
+			.to.equal('123,456,789,012,345,678,901,234,567,890');
+		Expect(tmpHarness.fable.DataFormat.addCommasToValue('0.000000000001234'))
+			.to.equal('0.000000000001234');
+	});
+
+	test('STRINGGETSEGMENTS custom enclosure maps work (the undefined-parameter bug) and {} disables enclosures', function ()
+	{
+		let tmpHarness = getStringHarness();
+		// An unbalanced double-quote previously jammed the enclosure stack and
+		// disabled splitting entirely; empty maps = plain split.
+		let tmpSource = { Quoted: '1/2" RAP,4LT,Unknown' };
+		tmpHarness.parser.solve('Plain = STRINGGETSEGMENTS(Quoted, ",", "")', tmpSource, {}, tmpHarness.manifest, tmpSource);
+		Expect(tmpSource.Plain).to.deep.equal([ '1/2" RAP', '4LT', 'Unknown' ]);
+	});
+});

@@ -538,6 +538,22 @@
 		"Name": "Collect (join) per-key string values by Exact Value from Object Property",
 		"Address": "fable.Math.histogramAggregationJoinByExactValue"
 	},
+	"trim": {
+		"Name": "Trim whitespace from both ends of a value",
+		"Address": "fable.DataFormat.stringTrim"
+	},
+	"rtrim": {
+		"Name": "Trim trailing whitespace from a value (e.g. SQL CHAR(n) padding)",
+		"Address": "fable.DataFormat.stringTrimEnd"
+	},
+	"ltrim": {
+		"Name": "Trim leading whitespace from a value",
+		"Address": "fable.DataFormat.stringTrimStart"
+	},
+	"addcommas": {
+		"Name": "Comma-group a numeric string verbatim (no float coercion; compose with TOFIXED for decimals)",
+		"Address": "fable.DataFormat.addCommasToValue"
+	},
 	"dateformat": {
 		"Name": "Format a Date with dayjs tokens in a timezone (explicit param, else the configured default)",
 		"Address": "fable.Dates.formatDate"

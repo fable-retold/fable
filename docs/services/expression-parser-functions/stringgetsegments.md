@@ -6,6 +6,8 @@ Splits a string into segments by a delimiter.
 
 ```
 stringgetsegments(text, delimiter)
+stringgetsegments(text, delimiter, "")
+
 ```
 
 ## Parameters
@@ -72,3 +74,10 @@ SecondItem = Segments[1]
 - Returns array of strings
 - Empty between delimiters creates empty string
 - Uses the Utility service
+
+## Enclosure handling
+
+By default, segments inside enclosures (`{} [] () " '`) are not split —
+and an UNBALANCED quote in the data jams the enclosure stack, silently
+disabling splitting for the rest of the string. Pass `""` as the third
+argument for a plain split with no enclosure handling.
