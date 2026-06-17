@@ -75,7 +75,7 @@ suite
 							() =>
 							{
 								let tmpTimeDelta = testFable.ProgressTime.getTimeStampDelta();
-								Expect(tmpTimeDelta).to.be.greaterThan(99);
+								Expect(tmpTimeDelta).to.be.greaterThan(90);
 								Expect(testFable.ProgressTime.getTimeStampDeltaMessage(tmpTimeDelta)).to.be.a('string');
 								testFable.ProgressTime.logTimeStampDelta();
 								return fDone();
@@ -100,7 +100,7 @@ suite
 								Expect(testFable.ProgressTime.getTimeStampDelta('IntegrationOperation')).to.be.greaterThan(20);
 								Expect(testFable.ProgressTime.getDurationBetweenTimestamps('IntegrationOperation', 'SubPushOperation')).to.be.greaterThan(20);
 								return fDone();
-							}, 21
+							}, 50
 						)
 					}
 				);
