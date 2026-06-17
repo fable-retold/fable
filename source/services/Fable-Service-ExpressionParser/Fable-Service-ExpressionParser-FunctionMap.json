@@ -562,6 +562,10 @@
 		"Name": "Compute readable chart axis tick labels (sparse same-length array) from a dense value set",
 		"Address": "fable.Math.chartTickLabels"
 	},
+	"movingaverage": {
+		"Name": "Trailing moving average (running average of the N most recent values), nulls during warm-up; optional parallel reset-flags array restarts the window",
+		"Address": "fable.Math.movingAverage"
+	},
 	"setdensity": {
 		"Name": "Analyze ordered-set density: natural boundaries (calendar units / nice numeric steps / positions) fitting a budget",
 		"Address": "fable.Math.analyzeSetDensity"
