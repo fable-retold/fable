@@ -1338,6 +1338,88 @@ class FableServiceMath extends libFableServiceBase
 	}
 
 	/**
+	 * Trailing moving average over an ordered value set — the customer's
+	 * "running average of the N most recent results". Positions before a full
+	 * window (and the first N-1 after any reset) are null, so a chart line
+	 * starts at the first complete window (matches the paper control chart's
+	 * blank warm-up).
+	 *
+	 * Partitioning (e.g. per MixDesign) is done by filtering the set before
+	 * calling. `pResetFlags` additionally restarts the average mid-set wherever
+	 * a flag is truthy — the WI "restart running average at any point" feature.
+	 * The window never reaches across a reset, and the warm-up re-triggers after
+	 * one. The marker column can be wired later; the mechanism is here now.
+	 *
+	 * @param {Array} pValueSet - ordered numeric values (or numeric strings).
+	 * @param {number} [pWindow=4] - window size (most-recent N).
+	 * @param {number} [pDecimals] - if set, round each average to this many decimals; else full precision.
+	 * @param {Array} [pResetFlags] - optional parallel array; a truthy entry restarts the window at that index.
+	 * @return {Array} same-length array of trailing averages (null during warm-up / on a non-numeric window).
+	 */
+	movingAverage(pValueSet, pWindow, pDecimals, pResetFlags)
+	{
+		// Accept a plain array OR the parser's `RecordSubset[].Field` keyed-object
+		// form (values in row/insertion order). Non-collections pass through.
+		let tmpValues;
+		if (Array.isArray(pValueSet)) { tmpValues = pValueSet; }
+		else if (pValueSet && typeof pValueSet === 'object') { tmpValues = Object.values(pValueSet); }
+		else { return pValueSet; }
+		const tmpWindow = (isNaN(pWindow) || parseInt(pWindow, 10) < 1) ? 4 : parseInt(pWindow, 10);
+		const tmpDecimals = (pDecimals === undefined || pDecimals === null || isNaN(pDecimals)) ? null : parseInt(pDecimals, 10);
+		let tmpResets = null;
+		if (Array.isArray(pResetFlags)) { tmpResets = pResetFlags; }
+		else if (pResetFlags && typeof pResetFlags === 'object') { tmpResets = Object.values(pResetFlags); }
+		const tmpOutput = new Array(tmpValues.length).fill(null);
+		let tmpSegmentStart = 0;
+		for (let i = 0; i < tmpValues.length; i++)
+		{
+			// A truthy reset flag starts a new running-average segment at i.
+			if (tmpResets && this._isResetFlag(tmpResets[i]))
+			{
+				tmpSegmentStart = i;
+			}
+			const tmpWindowStart = Math.max(tmpSegmentStart, (i - tmpWindow) + 1);
+			// Warm-up: not enough points accumulated since the segment start.
+			if (((i - tmpWindowStart) + 1) < tmpWindow)
+			{
+				continue;
+			}
+			let tmpSum = '0';
+			let tmpComplete = true;
+			for (let j = tmpWindowStart; j <= i; j++)
+			{
+				if (this.isNumeric(tmpValues[j]) === '0')
+				{
+					tmpComplete = false;
+					break;
+				}
+				tmpSum = this.addPrecise(tmpSum, tmpValues[j]);
+			}
+			if (!tmpComplete)
+			{
+				continue;
+			}
+			const tmpAverage = this.dividePrecise(tmpSum, tmpWindow);
+			tmpOutput[i] = (tmpDecimals === null) ? tmpAverage : this.roundPrecise(tmpAverage, tmpDecimals);
+		}
+		return tmpOutput;
+	}
+
+	/**
+	 * @param {*} pFlag
+	 * @return {boolean} true if the value is a running-average reset marker.
+	 */
+	_isResetFlag(pFlag)
+	{
+		if (pFlag === undefined || pFlag === null || pFlag === false)
+		{
+			return false;
+		}
+		const tmpString = String(pFlag).trim().toLowerCase();
+		return tmpString !== '' && tmpString !== '0' && tmpString !== 'false' && tmpString !== 'no';
+	}
+
+	/**
 	 * Collect (join) per-key string values from a set of objects — the
 	 * string-valued sibling of histogramAggregationByExactValue. Returns an
 	 * insertion-ordered { key: "v1<separator>v2..." } object, so
