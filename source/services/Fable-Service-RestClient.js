@@ -27,6 +27,21 @@ class FableServiceRestClient extends libFableServiceBase
 		// of the request options before they are passed to the request library.
 		this.prepareRequestOptions = (pOptions) => { return pOptions; };
 
+		// Optional, UI-agnostic authentication-recovery hook. Default null, so
+		// existing server-to-server callers are completely unaffected. When set
+		// to an (async) function and a completed response has statusCode 401 on a
+		// request that is not itself a replay, the client awaits this hook; a
+		// truthy resolution replays the original request exactly once, anything
+		// else returns the original 401 to the caller unchanged. The hook never
+		// imports app UI -- the app assigns it (e.g. a re-auth modal controller),
+		// which is what makes recovery reusable across every Fable consumer.
+		this.authenticationRecovery = null;
+
+		// Single-flight state for the recovery hook: a burst of concurrent 401s
+		// collapses to exactly one authenticationRecovery() call. Cleared on
+		// settle so a later, unrelated expiry re-arms recovery.
+		this._authenticationRecoveryPromise = null;
+
 		// Default per-request timeout (ms). Applied in preRequest when a caller
 		// does not supply their own. Node 20+ installs a ~5s socket timeout on
 		// http.globalAgent that aborts legitimately long-running requests; any
@@ -347,6 +362,8 @@ class FableServiceRestClient extends libFableServiceBase
 
 	executeChunkedRequest(pOptions, fCallback)
 	{
+		let tmpReplayOptions = this._captureReplayOptions(pOptions);
+
 		let tmpOptions = this.preRequest(pOptions);
 
 		tmpOptions.RequestStartTime = this.fable.log.getTimeStamp();
@@ -390,13 +407,16 @@ class FableServiceRestClient extends libFableServiceBase
 							let tmpCompletionTime = this.fable.log.getTimeStamp();
 							this.fable.log.debug(`==> ${tmpOptions.method} completed data size ${tmpData.length}b received in ${this.dataFormat.formatTimeDelta(tmpOptions.RequestStartTime, tmpCompletionTime)}ms`);
 						}
-						return fCallback(pError, pResponse, tmpData);
+						return this._completeWithRecovery(tmpReplayOptions, pError, pResponse, tmpData,
+							() => this.executeChunkedRequest(tmpReplayOptions, fCallback), fCallback);
 					});
 			});
 	}
 
 	executeChunkedRequestBinary(pOptions, fCallback)
 	{
+		let tmpReplayOptions = this._captureReplayOptions(pOptions);
+
 		let tmpOptions = this.preRequest(pOptions);
 
 		tmpOptions.RequestStartTime = this.fable.log.getTimeStamp();
@@ -451,14 +471,116 @@ class FableServiceRestClient extends libFableServiceBase
 							let tmpCompletionTime = this.fable.log.getTimeStamp();
 							this.fable.log.debug(`==> ${tmpOptions.method} completed data size ${tmpDataBuffer.length}b received in ${this.dataFormat.formatTimeDelta(tmpOptions.RequestStartTime, tmpCompletionTime)}ms`);
 						}
-						return fCallback(pError, pResponse, tmpDataBuffer);
+						return this._completeWithRecovery(tmpReplayOptions, pError, pResponse, tmpDataBuffer,
+							() => this.executeChunkedRequestBinary(tmpReplayOptions, fCallback), fCallback);
 					});
 			});
+	}
+
+	/**
+	 * Shallow-snapshot the caller's options BEFORE preRequest mutates them, so a
+	 * recovery replay can re-run the same request cleanly. preRequest prepends
+	 * RestClientURLPrefix to `url` in place; replaying the already-mutated object
+	 * would double-prefix. Replaying from this snapshot re-runs preRequest once.
+	 *
+	 * @param {Object} pOptions - The caller's request options.
+	 * @return {Object} A shallow copy safe to re-issue.
+	 * @private
+	 */
+	_captureReplayOptions(pOptions)
+	{
+		return Object.assign({}, pOptions);
+	}
+
+	/**
+	 * Invoke the authenticationRecovery hook under a single-flight guard. A burst
+	 * of concurrent 401s shares one hook invocation; all await the same promise,
+	 * then each replays independently. The shared promise is cleared on settle so
+	 * a later, unrelated expiry re-arms recovery. Resolves to a strict boolean
+	 * (true only when the hook resolved exactly true); rejects if the hook throws.
+	 *
+	 * @param {Object} pRequestContext - Context passed to the hook ({ options, response }).
+	 * @return {Promise<boolean>}
+	 * @private
+	 */
+	_runAuthenticationRecovery(pRequestContext)
+	{
+		if (this._authenticationRecoveryPromise)
+		{
+			return this._authenticationRecoveryPromise;
+		}
+		let tmpInvocation;
+		try
+		{
+			tmpInvocation = Promise.resolve(this.authenticationRecovery(pRequestContext));
+		}
+		catch (pError)
+		{
+			tmpInvocation = Promise.reject(pError);
+		}
+		this._authenticationRecoveryPromise = tmpInvocation.then(
+			(pResult) =>
+			{
+				this._authenticationRecoveryPromise = null;
+				return (pResult === true);
+			},
+			(pError) =>
+			{
+				this._authenticationRecoveryPromise = null;
+				throw pError;
+			});
+		return this._authenticationRecoveryPromise;
+	}
+
+	/**
+	 * Shared completion seam for every request path. On a completed 401, with a
+	 * recovery hook installed, on a request that is not itself already a replay,
+	 * it awaits recovery: on success it replays the request exactly once (via
+	 * fReplay, whose pReplayOptions carry the __authRetry marker so the replay can
+	 * never re-enter recovery -- a hard one-retry cap); otherwise it delivers the
+	 * original response to fCallback unchanged. Every other outcome (2xx, 5xx,
+	 * timeout, no hook) passes straight through, so opt-out callers are untouched.
+	 *
+	 * @param {Object} pReplayOptions - The replay snapshot (also carries the retry marker).
+	 * @param {Error|null} pError - The error from the request, if any.
+	 * @param {Object} pResponse - The response object (statusCode read here).
+	 * @param {*} pBody - The processed body for this path (parsed JSON / string / Buffer).
+	 * @param {Function} fReplay - Re-issues the request from pReplayOptions.
+	 * @param {Function} fCallback - The caller's callback (pError, pResponse, pBody).
+	 * @private
+	 */
+	_completeWithRecovery(pReplayOptions, pError, pResponse, pBody, fReplay, fCallback)
+	{
+		if (pResponse && pResponse.statusCode === 401 && typeof this.authenticationRecovery === 'function' && !pReplayOptions.__authRetry)
+		{
+			// Stamp the one-retry marker before recovery so the replay can never
+			// itself trigger another recovery pass.
+			pReplayOptions.__authRetry = true;
+			this._runAuthenticationRecovery({ options: pReplayOptions, response: pResponse }).then(
+				(pRecovered) =>
+				{
+					if (pRecovered === true)
+					{
+						return fReplay();
+					}
+					return fCallback(pError, pResponse, pBody);
+				},
+				() =>
+				{
+					// A throwing/rejecting recovery is treated as "not recovered":
+					// hand the original 401 back untouched.
+					return fCallback(pError, pResponse, pBody);
+				});
+			return;
+		}
+		return fCallback(pError, pResponse, pBody);
 	}
 
 	executeJSONRequest(pOptions, fCallback)
 	{
 		pOptions.json = true;
+
+		let tmpReplayOptions = this._captureReplayOptions(pOptions);
 
 		let tmpOptions = this.preRequest(pOptions);
 
@@ -523,7 +645,8 @@ class FableServiceRestClient extends libFableServiceBase
 							let tmpStatusCode = pResponse ? pResponse.statusCode : 'unknown';
 							return fCallback(new Error(`JSON parse failed (HTTP ${tmpStatusCode}): ${tmpJSONData.substring(0, 200)}`), pResponse, null);
 						}
-						return fCallback(pError, pResponse, tmpParsedJSON);
+						return this._completeWithRecovery(tmpReplayOptions, pError, pResponse, tmpParsedJSON,
+							() => this.executeJSONRequest(tmpReplayOptions, fCallback), fCallback);
 					});
 			});
 	}
@@ -647,6 +770,8 @@ class FableServiceRestClient extends libFableServiceBase
 	 */
 	_executeBinaryUploadInternal(pOptions, fCallback, fOnProgress)
 	{
+		let tmpReplayOptions = this._captureReplayOptions(pOptions);
+
 		let tmpOptions = this.preRequest(pOptions);
 
 		tmpOptions.RequestStartTime = this.fable.log.getTimeStamp();
@@ -691,12 +816,19 @@ class FableServiceRestClient extends libFableServiceBase
 							let tmpCompletionTime = this.fable.log.getTimeStamp();
 							this.fable.log.debug(`==> Binary upload ${tmpOptions.method} completed in ${this.dataFormat.formatTimeDelta(tmpOptions.RequestStartTime, tmpCompletionTime)}ms`);
 						}
-						// Signal completion via progress callback
-						if (typeof fOnProgress === 'function')
+						// Deliver terminally: fire the completion progress only when
+						// we actually hand the response back (not when we are about to
+						// replay after recovery -- the replay signals its own progress).
+						let fDeliver = (pDeliverError, pDeliverResponse, pDeliverBody) =>
 						{
-							fOnProgress(1.0);
-						}
-						return fCallback(pError, pResponse, tmpData);
+							if (typeof fOnProgress === 'function')
+							{
+								fOnProgress(1.0);
+							}
+							return fCallback(pDeliverError, pDeliverResponse, pDeliverBody);
+						};
+						return this._completeWithRecovery(tmpReplayOptions, pError, pResponse, tmpData,
+							() => this._executeBinaryUploadInternal(tmpReplayOptions, fCallback, fOnProgress), fDeliver);
 					});
 			});
 	}
