@@ -14,7 +14,7 @@ A comprehensive Node.js service dependency injection, configuration management, 
 - **Math Operations** - Arbitrary precision math using big.js
 - **Date Manipulation** - Comprehensive date operations using day.js
 - **Expression Parser** - Evaluate mathematical and logical expressions
-- **REST Client** - HTTP request handling with caching
+- **REST Client** - HTTP request handling with timeouts and opt-in retry
 - **Template Engine** - Variable substitution and rendering
 - **And much more...**
 
@@ -351,7 +351,7 @@ Instantiated when needed via `fable.instantiateServiceProvider()`:
 
 - **Template** - Variable substitution engine
 - **MetaTemplate** - Advanced templating with iterations
-- **RestClient** - HTTP requests with caching
+- **RestClient** - HTTP requests with timeouts and opt-in retry
 - **ExpressionParser** - Mathematical expression evaluation
 - **Operation** - Async operation management
 - **CSVParser** - CSV file parsing

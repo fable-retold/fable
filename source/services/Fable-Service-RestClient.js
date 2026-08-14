@@ -39,6 +39,14 @@ const libHttps = require('https');
 const ENABLED_RETRY_ATTEMPTS = 3;
 
 /**
+ * Statuses defined to carry no message body (RFC 7231 §6.3.5, §6.3.6; RFC 7232
+ * §4.1). An empty body on one of these is the contract, not a parse failure.
+ *
+ * @type {Array<number>}
+ */
+const NO_CONTENT_STATUS_CODES = [ 204, 205, 304 ];
+
+/**
  * The stock retry policy. `MaxAttempts: 1` means retry is OFF by default -- an
  * un-configured client behaves exactly as it always has, with no replay of any
  * kind. Callers opt in per-service, per-client, or per-request.
@@ -625,6 +633,19 @@ class FableServiceRestClient extends libFableServiceBase
 		return libSimpleGet;
 	}
 
+	/**
+	 * Serialize the service-level cookie jar onto the request.
+	 *
+	 * A cookie header the caller supplied is authoritative and is left alone: a
+	 * forwarded caller identity has to be able to travel on a client that also
+	 * carries its own bound session, and silently replacing it would run one
+	 * caller's request under another's identity. This matches how the rest of
+	 * the ecosystem composes cookies (see pict-sessionmanager's
+	 * onPrepareCookies, which merges rather than replaces).
+	 *
+	 * @param {Record<string, any>} pRequestOptions - The request options.
+	 * @return {Record<string, any>} The same object, decorated.
+	 */
 	prepareCookies(pRequestOptions)
 	{
 		if (this.cookie)
@@ -635,10 +656,14 @@ class FableServiceRestClient extends libFableServiceBase
 				pRequestOptions.headers = {};
 			}
 			let tmpCookieKeys = Object.keys(tmpCookieObject);
-			if (tmpCookieKeys.length > 0)
+			if (tmpCookieKeys.length > 0 && !pRequestOptions.headers.cookie)
 			{
-				// Only grab the first for now.
-				pRequestOptions.headers.cookie = libCookie.serialize(tmpCookieKeys[0], tmpCookieObject[tmpCookieKeys[0]]);
+				let tmpCookiePairs = [];
+				for (let i = 0; i < tmpCookieKeys.length; i++)
+				{
+					tmpCookiePairs.push(libCookie.serialize(tmpCookieKeys[i], tmpCookieObject[tmpCookieKeys[i]]));
+				}
+				pRequestOptions.headers.cookie = tmpCookiePairs.join('; ');
 			}
 		}
 		return pRequestOptions;
@@ -649,8 +674,11 @@ class FableServiceRestClient extends libFableServiceBase
 		// Validate the options object
 		let tmpOptions = this.prepareCookies(pOptions);
 
-		// Prepend a string to the URL if it exists in the Fable Config
-		if ('RestClientURLPrefix' in this.fable.settings)
+		// Prepend a string to the URL if it exists in the Fable Config. An
+		// already-absolute URL is left alone: the prefix exists to complete a
+		// relative path, and a library layer that builds its own fully-qualified
+		// URLs would otherwise be corrupted by a host application's setting.
+		if (('RestClientURLPrefix' in this.fable.settings) && !this._isAbsoluteURL(tmpOptions.url))
 		{
 			tmpOptions.url = this.fable.settings.RestClientURLPrefix + tmpOptions.url;
 		}
@@ -664,6 +692,18 @@ class FableServiceRestClient extends libFableServiceBase
 		}
 
 		return this.prepareRequestOptions(tmpOptions);
+	}
+
+	/**
+	 * Whether a URL already carries its own scheme, and so needs no prefixing.
+	 *
+	 * @private
+	 * @param {string} pUrl
+	 * @return {boolean}
+	 */
+	_isAbsoluteURL(pUrl)
+	{
+		return (typeof pUrl === 'string') && /^[a-z][a-z0-9+.-]*:\/\//i.test(pUrl);
 	}
 
 	/**
@@ -788,6 +828,46 @@ class FableServiceRestClient extends libFableServiceBase
 	}
 
 	/**
+	 * Dispatch one hop through simple-get, normalizing a timeout into a coded
+	 * error before anything downstream classifies it.
+	 *
+	 * simple-get reports a socket timeout as a bare Error carrying no `code` and
+	 * no `cause` (index.js: `cb(new Error('Request timed out'))`), so the
+	 * code-based transport matching in _evaluateRetryOutcome can never fire on
+	 * it. The underlying request's own `timeout` event is the precise signal, so
+	 * classification stays code-based rather than depending on simple-get's
+	 * message text; the message is a fallback for transports that never emit the
+	 * event (the browser http shim).
+	 *
+	 * @private
+	 * @param {Object} pOptions - The prepared request options.
+	 * @param {(err?: Error, res?: import('http').IncomingMessage) => void} fCallback
+	 * @return {Object} The underlying request object.
+	 */
+	_dispatchRequest(pOptions, fCallback)
+	{
+		let tmpTimedOut = false;
+		const tmpRequest = libSimpleGet(pOptions,
+			(pError, pResponse) =>
+			{
+				if (pError && !pError.code && !(pError.cause && pError.cause.code)
+					&& (tmpTimedOut || /timed out/i.test(pError.message || '')))
+				{
+					pError.code = 'ETIMEDOUT';
+				}
+				return fCallback(pError, pResponse);
+			});
+		// Prepended because simple-get's own timeout handler settles the
+		// (once-wrapped) callback synchronously, so a plain listener would run
+		// after the outcome had already been decided.
+		if (tmpRequest && typeof tmpRequest.prependListener === 'function')
+		{
+			tmpRequest.prependListener('timeout', () => { tmpTimedOut = true; });
+		}
+		return tmpRequest;
+	}
+
+	/**
 	 * Dispatch a request via simple-get, transparently following 3xx redirects
 	 * until a non-redirect response or hard error.
 	 *
@@ -810,7 +890,7 @@ class FableServiceRestClient extends libFableServiceBase
 	{
 		if (pOptions.followRedirects === false)
 		{
-			return libSimpleGet(pOptions, fCallback);
+			return this._dispatchRequest(pOptions, fCallback);
 		}
 
 		// Disable simple-get's own redirect loop — we own it from here.
@@ -818,7 +898,7 @@ class FableServiceRestClient extends libFableServiceBase
 		const tmpOriginalURL = pOptions.url;
 		const tmpOriginalHost = this._parseHostname(tmpOriginalURL);
 
-		return libSimpleGet(pOptions, (pError, pResponse) =>
+		return this._dispatchRequest(pOptions, (pError, pResponse) =>
 		{
 			if (pError)
 			{
@@ -1124,6 +1204,21 @@ class FableServiceRestClient extends libFableServiceBase
 					return;
 				}
 			}
+			else if (tmpPolicy.MaxAttempts > 1 && (pError || (pResponse && pResponse.statusCode >= 400))
+				&& this._isRetryableRequest(pReplayOptions, tmpPolicy))
+			{
+				// Retry was enabled and this request was eligible, yet the failure
+				// classified as non-transient. Without this line that decision is
+				// indistinguishable from retry never having been configured, which
+				// is exactly how a misclassified failure hides.
+				this.fable.log.debug(`RestClient not retrying ${pReplayOptions.method || 'GET'} ${pReplayOptions.url}: failure classified as non-transient.`,
+					{
+						Action: 'RestClientRetryDeclined',
+						StatusCode: (pResponse && pResponse.statusCode) || null,
+						ErrorCode: (pError && pError.code) || null,
+						ErrorMessage: (pError && pError.message) || null
+					});
+			}
 			return fCallback(pError, pResponse, pBody);
 		}
 
@@ -1229,6 +1324,16 @@ class FableServiceRestClient extends libFableServiceBase
 							this.fable.log.debug(`==> JSON ${tmpOptions.method} completed - received in ${this.dataFormat.formatTimeDelta(tmpOptions.RequestStartTime, tmpCompletionTime)}ms`);
 						}
 						let tmpParsedJSON;
+						if (tmpJSONData.length < 1
+							&& ((NO_CONTENT_STATUS_CODES.indexOf(pResponse.statusCode) > -1) || (tmpOptions.method === 'HEAD')))
+						{
+							// A response DEFINED to carry no body -- those statuses,
+							// or any HEAD -- is not a parse failure. Narrowed on
+							// purpose: an empty body on a 200 GET still means the
+							// response was truncated or the server misbehaved.
+							return this._completeWithRecovery(tmpReplayOptions, pError, pResponse, null,
+								() => this.executeJSONRequest(tmpReplayOptions, fCallback), fCallback);
+						}
 						try
 						{
 							tmpParsedJSON = JSON.parse(tmpJSONData);
@@ -1300,11 +1405,6 @@ class FableServiceRestClient extends libFableServiceBase
 
 	headJSON(pOptions, fCallback)
 	{
-		if (typeof(pOptions.body) != 'object')
-		{
-			return fCallback(new Error(`HEAD JSON Error Invalid options object`));
-		}
-
 		pOptions.method = 'HEAD';
 
 		return this.executeJSONRequest(pOptions, fCallback);

@@ -859,5 +859,192 @@ suite
 								);
 						}
 					);
+
+			suite
+				(
+					'Bodyless Responses',
+					function ()
+					{
+						test
+							(
+								'A 204 with no body is delivered as a null body, not a parse failure.',
+								function (fTestComplete)
+								{
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse) { pResponse.writeHead(204); pResponse.end(); });
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-NoContent');
+											tmpRestClient.delJSON({ url: 'http://127.0.0.1:' + tmpServer.address().port + '/Widget/1' },
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.equal(null);
+													Expect(pResponse.statusCode).to.equal(204);
+													Expect(pBody).to.equal(null);
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'An empty body on a 200 is still a parse failure.',
+								function (fTestComplete)
+								{
+									// The 204 allowance is deliberately narrow -- an empty
+									// 200 means a truncated or misbehaving response.
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse) { pResponse.writeHead(200); pResponse.end(); });
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-EmptyOK');
+											tmpRestClient.getJSON('http://127.0.0.1:' + tmpServer.address().port + '/Widget',
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.be.an.instanceof(Error);
+													Expect(pError.message).to.contain('JSON parse failed');
+													Expect(pBody).to.equal(null);
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'A HEAD request succeeds without a body on the options.',
+								function (fTestComplete)
+								{
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse) { pResponse.writeHead(200, { 'X-Seen-Method': pRequest.method }); pResponse.end(); });
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-Head');
+											tmpRestClient.headJSON({ url: 'http://127.0.0.1:' + tmpServer.address().port + '/Widget/1' },
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.equal(null);
+													Expect(pResponse.headers['x-seen-method']).to.equal('HEAD');
+													Expect(pBody).to.equal(null);
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+					}
+				);
+
+			suite
+				(
+					'Cookie Composition',
+					function ()
+					{
+						test
+							(
+								'A cookie header supplied by the caller is not replaced by the service cookie.',
+								function (fTestComplete)
+								{
+									// A forwarded caller identity has to survive on a client
+									// that also carries its own bound session.
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse)
+										{
+											pResponse.writeHead(200, { 'Content-Type': 'application/json' });
+											pResponse.end(JSON.stringify({ Cookie: pRequest.headers.cookie || null }));
+										});
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-CookieOverride');
+											tmpRestClient.cookie = { UserSession: 'BOUND-MACHINE-SESSION' };
+											tmpRestClient.getJSON(
+												{
+													url: 'http://127.0.0.1:' + tmpServer.address().port + '/Widget',
+													headers: { cookie: 'UserSession=FORWARDED-CALLER' }
+												},
+												function (pError, pResponse, pBody)
+												{
+													Expect(pBody.Cookie).to.equal('UserSession=FORWARDED-CALLER');
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'Every cookie in the jar is serialized, not just the first.',
+								function (fTestComplete)
+								{
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse)
+										{
+											pResponse.writeHead(200, { 'Content-Type': 'application/json' });
+											pResponse.end(JSON.stringify({ Cookie: pRequest.headers.cookie || null }));
+										});
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-CookieJar');
+											tmpRestClient.cookie = { SessionA: '111', SessionB: '222' };
+											tmpRestClient.getJSON('http://127.0.0.1:' + tmpServer.address().port + '/Widget',
+												function (pError, pResponse, pBody)
+												{
+													Expect(pBody.Cookie).to.contain('SessionA=111');
+													Expect(pBody.Cookie).to.contain('SessionB=222');
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+					}
+				);
+
+			suite
+				(
+					'URL Prefixing',
+					function ()
+					{
+						test
+							(
+								'A relative URL receives the configured prefix.',
+								function ()
+								{
+									var testFable = new libFable({ RestClientURLPrefix: 'https://api.example.com' });
+									var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-PrefixRelative');
+									var tmpOptions = tmpRestClient.preRequest({ url: '/1.0/Widget/1', method: 'GET' });
+									Expect(tmpOptions.url).to.equal('https://api.example.com/1.0/Widget/1');
+								}
+							);
+
+						test
+							(
+								'An already-absolute URL is left alone.',
+								function ()
+								{
+									// A library layer that builds fully-qualified URLs must
+									// not be corrupted by a host application's prefix.
+									var testFable = new libFable({ RestClientURLPrefix: 'https://api.example.com' });
+									var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-PrefixAbsolute');
+									var tmpOptions = tmpRestClient.preRequest({ url: 'http://127.0.0.1:8086/1.0/Widget/1', method: 'GET' });
+									Expect(tmpOptions.url).to.equal('http://127.0.0.1:8086/1.0/Widget/1');
+								}
+							);
+					}
+				);
 		}
 	);

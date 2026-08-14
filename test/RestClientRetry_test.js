@@ -1413,5 +1413,98 @@ suite
 							);
 					}
 				);
+
+			suite
+				(
+					'Transport Error Classification',
+					function ()
+					{
+						test
+							(
+								'A socket timeout is retried, and reaches the caller coded ETIMEDOUT.',
+								function (fTestComplete)
+								{
+									// simple-get reports a timeout as a bare Error with no
+									// code; without normalization it matches nothing in
+									// RetryErrorCodes and settles on the first attempt.
+									let tmpBlackhole = libHTTP.createServer(() => { /* never responds */ });
+									tmpBlackhole.listen(0, '127.0.0.1', () =>
+									{
+										let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 }, RequestTimeout: 60 });
+										tmpHarness.Client.postJSON(
+											{ url: `http://127.0.0.1:${tmpBlackhole.address().port}/Authenticate`, body: {}, RetrySafe: true },
+											(pError) =>
+											{
+												Expect(pError).to.be.an.instanceof(Error);
+												Expect(pError.code).to.equal('ETIMEDOUT');
+												Expect(tmpHarness.Delays.length).to.equal(2);
+												tmpBlackhole.close();
+												fTestComplete();
+											});
+									});
+								}
+							);
+
+						test
+							(
+								'A coded transport error listed in RetryErrorCodes is retried.',
+								function (fTestComplete)
+								{
+									// Port 1 is reliably closed, so the connection is
+									// refused before any response exists.
+									let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 } });
+									tmpHarness.Client.getJSON({ url: 'http://127.0.0.1:1/Nothing' },
+										(pError) =>
+										{
+											Expect(pError).to.be.an.instanceof(Error);
+											Expect(pError.code).to.equal('ECONNREFUSED');
+											Expect(tmpHarness.Delays.length).to.equal(2);
+											fTestComplete();
+										});
+								}
+							);
+
+						test
+							(
+								'A transport error absent from RetryErrorCodes settles without a replay.',
+								function (fTestComplete)
+								{
+									let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 } });
+									tmpHarness.Client.retryPolicy.RetryErrorCodes = [ 'ECONNRESET' ];
+									tmpHarness.Client.getJSON({ url: 'http://127.0.0.1:1/Nothing' },
+										(pError) =>
+										{
+											Expect(pError.code).to.equal('ECONNREFUSED');
+											Expect(tmpHarness.Delays.length).to.equal(0);
+											fTestComplete();
+										});
+								}
+							);
+
+						test
+							(
+								'A timeout on a request that is not replayable settles with the coded error.',
+								function (fTestComplete)
+								{
+									// Normalization is independent of eligibility: a plain
+									// POST still gets its code, it just never replays.
+									let tmpBlackhole = libHTTP.createServer(() => { /* never responds */ });
+									tmpBlackhole.listen(0, '127.0.0.1', () =>
+									{
+										let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 }, RequestTimeout: 60 });
+										tmpHarness.Client.postJSON(
+											{ url: `http://127.0.0.1:${tmpBlackhole.address().port}/Write`, body: {} },
+											(pError) =>
+											{
+												Expect(pError.code).to.equal('ETIMEDOUT');
+												Expect(tmpHarness.Delays.length).to.equal(0);
+												tmpBlackhole.close();
+												fTestComplete();
+											});
+									});
+								}
+							);
+					}
+				);
 		}
 	);
