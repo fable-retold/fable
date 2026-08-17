@@ -31,12 +31,28 @@ const libHttps = require('https');
  */
 
 /**
+ * @typedef {Object} RestClientRetrySafetyContext
+ * @property {Record<string, any>} Options - The request under consideration. No response exists yet:
+ *   safety is a property of the request, not of how it turned out.
+ * @property {RestClientRetryPolicy} Policy - The resolved policy for this request.
+ */
+
+/**
  * Attempt count used when retry is switched on without an explicit budget
  * (`Retry: true`). One original attempt plus two replays.
  *
  * @type {number}
  */
 const ENABLED_RETRY_ATTEMPTS = 3;
+
+/**
+ * Chain length at which unkeyed hook registration is called out as probable lifecycle churn. High
+ * enough that a legitimately layered application never trips it, low enough to surface a leak long
+ * before it matters.
+ *
+ * @type {number}
+ */
+const RETRY_HOOK_CHAIN_WARNING_LENGTH = 32;
 
 /**
  * Statuses defined to carry no message body (RFC 7231 §6.3.5, §6.3.6; RFC 7232
@@ -188,6 +204,27 @@ class FableServiceRestClient extends libFableServiceBase
 		/** @type {((pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined))|null} */
 		this.retryClassifier = (typeof this.options.RetryClassifier === 'function') ? this.options.RetryClassifier : null;
 
+		// Decision-hook chains. Both are consulted in registration order, ahead of
+		// the built-in rule that tails each chain; a hook returns a verdict to
+		// decide or nothing to defer to whatever comes after it. Registering is
+		// how a library teaches the client about its own routes without every call
+		// site having to remember to say so -- pict registers the meadow
+		// POST /:Entity/Query route as replayable, and nothing that borrows the
+		// client needs to know it did.
+		//
+		// Safety ("may this be replayed at all") and classification ("was this
+		// outcome transient") are kept apart on purpose. Safety is a hard gate
+		// above classification, so no classification hook can ever authorize
+		// replaying a mutation.
+		//
+		// Hooks must be synchronous -- they run inline while the outcome is being
+		// decided. The lifecycle hooks (onBeforeRetry / onRetryExhausted) are the
+		// async ones, because those do work rather than answer questions.
+		/** @type {Array<(pContext: RestClientRetrySafetyContext) => (boolean|null|undefined)>} */
+		this.retrySafetyHooks = [];
+		/** @type {Array<(pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined)>} */
+		this.retryClassifierHooks = [];
+
 		// Lifecycle hooks. Both may be async and are awaited, so a hook can do
 		// real work before the replay goes out -- refresh a stream handle or a
 		// token, re-sign a URL, bump a metric. The context's `Options` object IS
@@ -200,6 +237,140 @@ class FableServiceRestClient extends libFableServiceBase
 		this.onBeforeRetry = (typeof this.options.OnBeforeRetry === 'function') ? this.options.OnBeforeRetry : null;
 		/** @type {((pContext: RestClientRetryContext) => any)|null} */
 		this.onRetryExhausted = (typeof this.options.OnRetryExhausted === 'function') ? this.options.OnRetryExhausted : null;
+	}
+
+	/**
+	 * Register a safety hook: given a request, may it be replayed?
+	 *
+	 * Return `true` (replayable) or `false` (never replay) to decide, or nothing to defer to the
+	 * next hook and finally to the built-in idempotent-method rule. Hooks run in registration
+	 * order, ahead of that rule.
+	 *
+	 * @param {(pContext: RestClientRetrySafetyContext) => (boolean|null|undefined)} fHook - The hook.
+	 * @return {() => void} A disposer that removes the hook.
+	 */
+	addRetrySafetyHook(fHook, pKey)
+	{
+		return this._registerDecisionHook(this.retrySafetyHooks, fHook, pKey, 'addRetrySafetyHook');
+	}
+
+	/**
+	 * Register a classification hook: given a settled request, was the outcome transient?
+	 *
+	 * Return `'retry'` or `'settle'` to decide, or nothing to defer to the next hook and finally
+	 * to the built-in status-code and transport-error-code rules.
+	 *
+	 * @param {(pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined)} fHook - The hook.
+	 * @return {() => void} A disposer that removes the hook.
+	 */
+	addRetryClassifierHook(fHook, pKey)
+	{
+		return this._registerDecisionHook(this.retryClassifierHooks, fHook, pKey, 'addRetryClassifierHook');
+	}
+
+	/**
+	 * Add a hook to a decision chain, keyed so re-registration is idempotent.
+	 *
+	 * A REST client lives as long as the application; a view that customizes retry behavior lives
+	 * as long as its route is mounted. Those lifecycles do not line up, and a view that registers
+	 * on mount will register again on every remount -- an unmount-time disposer only helps if it is
+	 * reliably called, and a hook written as an inline arrow is a fresh reference each time, so
+	 * identity alone cannot deduplicate it.
+	 *
+	 * Passing a stable `pKey` makes registration idempotent: the entry is replaced in place,
+	 * preserving its position in the chain so ordering does not drift across remounts. Unkeyed
+	 * registration still appends, for one-shot setup that genuinely runs once.
+	 *
+	 * @param {Array<{ Key: (string|null), Hook: Function }>} pChain - The chain to register into.
+	 * @param {Function} fHook - The hook.
+	 * @param {string} [pKey] - Stable identity for the registrant.
+	 * @param {string} pMethodName - Caller name, for the error message.
+	 * @return {() => void} A disposer that removes this registration.
+	 * @private
+	 */
+	_registerDecisionHook(pChain, fHook, pKey, pMethodName)
+	{
+		if (typeof fHook !== 'function')
+		{
+			throw new Error(`RestClient ${pMethodName} requires a function.`);
+		}
+		const tmpKey = (typeof pKey === 'string' && pKey.length > 0) ? pKey : null;
+		const tmpEntry = { Key: tmpKey, Hook: fHook };
+
+		if (tmpKey)
+		{
+			const tmpExistingIndex = pChain.findIndex((pCandidate) => (pCandidate.Key === tmpKey));
+			if (tmpExistingIndex > -1)
+			{
+				pChain[tmpExistingIndex] = tmpEntry;
+				return () =>
+				{
+					const tmpIndex = pChain.indexOf(tmpEntry);
+					if (tmpIndex > -1)
+					{
+						pChain.splice(tmpIndex, 1);
+					}
+				};
+			}
+		}
+
+		pChain.push(tmpEntry);
+
+		// Unkeyed registrations cannot be deduplicated, so a lifecycle mismatch
+		// shows up here as unbounded growth. Say so once rather than letting it
+		// degrade quietly.
+		if (pChain.length === RETRY_HOOK_CHAIN_WARNING_LENGTH)
+		{
+			this.fable.log.warn(`RestClient ${pMethodName} chain has reached ${pChain.length} entries; a caller is probably registering on a lifecycle the client does not share. Pass a stable key to make registration idempotent.`,
+				{ Action: 'RestClientRetryHookChainGrowth', Method: pMethodName, Length: pChain.length });
+		}
+
+		return () =>
+		{
+			const tmpIndex = pChain.indexOf(tmpEntry);
+			if (tmpIndex > -1)
+			{
+				pChain.splice(tmpIndex, 1);
+			}
+		};
+	}
+
+	/**
+	 * Run a decision-hook chain, stopping at the first hook that decides. A hook that throws is
+	 * logged and treated as a deferral, so broken application code degrades to the built-in rule
+	 * rather than breaking every request through the client.
+	 *
+	 * @param {Array<Function>} pHooks - The chain, in call order.
+	 * @param {Object} pContext - The context handed to each hook.
+	 * @param {(pVerdict: *) => boolean} fIsDecision - Whether a returned value counts as a decision.
+	 * @param {string} pChainName - Name used in the failure log.
+	 * @return {*} The deciding verdict, or undefined when every hook deferred.
+	 */
+	_runDecisionHookChain(pHooks, pContext, fIsDecision, pChainName)
+	{
+		if (!Array.isArray(pHooks))
+		{
+			return undefined;
+		}
+		for (let i = 0; i < pHooks.length; i++)
+		{
+			let tmpVerdict;
+			try
+			{
+				tmpVerdict = pHooks[i].Hook(pContext);
+			}
+			catch (pHookError)
+			{
+				this.fable.log.warn(`RestClient ${pChainName} hook ${i} threw; deferring: ${pHookError.message}`,
+					{ Action: 'RestClientRetryHookError', Chain: pChainName, Index: i });
+				continue;
+			}
+			if (fIsDecision(tmpVerdict))
+			{
+				return tmpVerdict;
+			}
+		}
+		return undefined;
 	}
 
 	/**
@@ -323,27 +494,31 @@ class FableServiceRestClient extends libFableServiceBase
 	 */
 	_classifyRetryOutcome(pContext)
 	{
-		const fClassifier = this._resolveRetryClassifier(pContext.Options);
-		if (!fClassifier)
+		// Effective chain, most specific first: the per-request classifier, the
+		// single-slot `retryClassifier` (kept so pre-chain callers keep working),
+		// then every registered hook in registration order. `RetryClassifier:
+		// false` on a request opts that request out of all of them.
+		const tmpChain = [];
+		const tmpRequestOptions = pContext.Options;
+		if (tmpRequestOptions && typeof tmpRequestOptions.RetryClassifier === 'function')
 		{
-			return null;
+			tmpChain.push({ Key: null, Hook: tmpRequestOptions.RetryClassifier });
 		}
-		let tmpVerdict;
-		try
+		else if (!tmpRequestOptions || tmpRequestOptions.RetryClassifier !== false)
 		{
-			tmpVerdict = fClassifier(pContext);
+			if (typeof this.retryClassifier === 'function')
+			{
+				tmpChain.push({ Key: null, Hook: this.retryClassifier });
+			}
+			for (let i = 0; i < this.retryClassifierHooks.length; i++)
+			{
+				tmpChain.push(this.retryClassifierHooks[i]);
+			}
 		}
-		catch (pClassifierError)
-		{
-			this.fable.log.warn(`RestClient retry classifier threw; deferring to the stock policy: ${pClassifierError.message}`,
-				{ Action: 'RestClientRetryClassifierError' });
-			return null;
-		}
-		if (tmpVerdict === 'retry' || tmpVerdict === 'settle')
-		{
-			return tmpVerdict;
-		}
-		return null;
+
+		const tmpVerdict = this._runDecisionHookChain(tmpChain, pContext,
+			(pCandidate) => (pCandidate === 'retry' || pCandidate === 'settle'), 'retryClassifier');
+		return (typeof tmpVerdict === 'undefined') ? null : tmpVerdict;
 	}
 
 	/**
@@ -393,6 +568,22 @@ class FableServiceRestClient extends libFableServiceBase
 	}
 
 	/**
+	 * Layer retry configuration onto this client's policy, in place.
+	 *
+	 * The public way for a library or application to turn retry on (or tune it) after construction.
+	 * Accepts the same forms as the constructor option: an overrides object, a number of attempts,
+	 * `true` for the recommended budget, or `false` to disable.
+	 *
+	 * @param {Partial<RestClientRetryPolicy>|number|boolean} pRetryConfiguration - The overrides.
+	 * @return {RestClientRetryPolicy} The resolved policy now in effect.
+	 */
+	configureRetry(pRetryConfiguration)
+	{
+		this.retryPolicy = this._buildRetryPolicy(this.retryPolicy, pRetryConfiguration);
+		return this.retryPolicy;
+	}
+
+	/**
 	 * Resolve the effective policy for a single request: the service policy with
 	 * any per-request `Retry` override layered on top.
 	 *
@@ -431,6 +622,9 @@ class FableServiceRestClient extends libFableServiceBase
 		{
 			return false;
 		}
+		// A per-request assertion is the most specific statement there is, so it
+		// outranks every hook. This is the override role; it is not how a whole
+		// class of endpoints should be described (register a hook for that).
 		if (pRequestOptions.RetrySafe === true)
 		{
 			return true;
@@ -439,6 +633,15 @@ class FableServiceRestClient extends libFableServiceBase
 		{
 			return false;
 		}
+
+		const tmpHookVerdict = this._runDecisionHookChain(this.retrySafetyHooks,
+			{ Options: pRequestOptions, Policy: pPolicy },
+			(pVerdict) => (typeof pVerdict === 'boolean'), 'retrySafety');
+		if (typeof tmpHookVerdict === 'boolean')
+		{
+			return tmpHookVerdict;
+		}
+
 		const tmpMethod = (pRequestOptions.method || 'GET').toUpperCase();
 		return Array.isArray(pPolicy.RetryMethods) && pPolicy.RetryMethods.indexOf(tmpMethod) > -1;
 	}

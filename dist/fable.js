@@ -3246,7 +3246,7 @@ try{if(!global.localStorage)return false;}catch(_){return false;}var val=global.
 // presumably different callback function.
 // This makes sure that own properties are retained, so that
 // decorations and such are not lost along the way.
-module.exports=wrappy;function wrappy(fn,cb){if(fn&&cb)return wrappy(fn)(cb);if(typeof fn!=='function')throw new TypeError('need wrapper function');Object.keys(fn).forEach(function(k){wrapper[k]=fn[k];});return wrapper;function wrapper(){var args=new Array(arguments.length);for(var i=0;i<args.length;i++){args[i]=arguments[i];}var ret=fn.apply(this,args);var cb=args[args.length-1];if(typeof ret==='function'&&ret!==cb){Object.keys(cb).forEach(function(k){ret[k]=cb[k];});}return ret;}}},{}],148:[function(require,module,exports){module.exports=extend;var hasOwnProperty=Object.prototype.hasOwnProperty;function extend(){var target={};for(var i=0;i<arguments.length;i++){var source=arguments[i];for(var key in source){if(hasOwnProperty.call(source,key)){target[key]=source[key];}}}return target;}},{}],149:[function(require,module,exports){module.exports={"name":"fable","version":"3.1.82","description":"A service dependency injection, configuration and logging library.","main":"source/Fable.js","scripts":{"start":"node source/Fable.js","coverage":"npx quack coverage","test":"npx quack test","build":"npx quack build","prepublishOnly":"npx quack build","docker-dev-build":"docker build ./ -f Dockerfile_LUXURYCode -t fable-image:local","docker-dev-run":"docker run -it -d --name fable-dev -p 30001:8080 -p 38086:8086 -v \"$PWD/.config:/home/coder/.config\"  -v \"$PWD:/home/coder/fable\" -u \"$(id -u):$(id -g)\" -e \"DOCKER_USER=$USER\" fable-image:local","docker-dev-shell":"docker exec -it fable-dev /bin/bash","tests":"npx quack test -g"},"mocha":{"diff":true,"extension":["js"],"package":"./package.json","reporter":"spec","slow":"75","timeout":"5000","ui":"tdd","watch-files":["source/**/*.js","test/**/*.js"],"watch-ignore":["lib/vendor"]},"browser":{"./source/service/Fable-Service-EnvironmentData.js":"./source/service/Fable-Service-EnvironmentData-Web.js","./source/service/Fable-Service-FilePersistence.js":"./source/service/Fable-Service-FilePersistence-Web.js"},"repository":{"type":"git","url":"https://github.com/fable-retold/fable.git"},"keywords":["entity","behavior"],"author":"Steven Velozo <steven@velozo.com> (http://velozo.com/)","license":"MIT","bugs":{"url":"https://github.com/fable-retold/fable/issues"},"homepage":"https://github.com/fable-retold/fable","devDependencies":{"pict-docuserve":"^1.4.19","quackage":"^1.3.0"},"dependencies":{"async.eachlimit":"^0.5.2","async.waterfall":"^0.5.2","big.js":"^7.0.1","cachetrax":"^1.0.6","cookie":"^1.1.1","data-arithmatic":"^1.0.7","dayjs":"^1.11.19","fable-log":"^3.0.18","fable-serviceproviderbase":"^3.0.19","fable-settings":"^3.0.17","fable-uuid":"^3.0.15","manyfest":"^1.0.49","simple-get":"^4.0.1"}};},{}],150:[function(require,module,exports){/**
+module.exports=wrappy;function wrappy(fn,cb){if(fn&&cb)return wrappy(fn)(cb);if(typeof fn!=='function')throw new TypeError('need wrapper function');Object.keys(fn).forEach(function(k){wrapper[k]=fn[k];});return wrapper;function wrapper(){var args=new Array(arguments.length);for(var i=0;i<args.length;i++){args[i]=arguments[i];}var ret=fn.apply(this,args);var cb=args[args.length-1];if(typeof ret==='function'&&ret!==cb){Object.keys(cb).forEach(function(k){ret[k]=cb[k];});}return ret;}}},{}],148:[function(require,module,exports){module.exports=extend;var hasOwnProperty=Object.prototype.hasOwnProperty;function extend(){var target={};for(var i=0;i<arguments.length;i++){var source=arguments[i];for(var key in source){if(hasOwnProperty.call(source,key)){target[key]=source[key];}}}return target;}},{}],149:[function(require,module,exports){module.exports={"name":"fable","version":"3.1.83","description":"A service dependency injection, configuration and logging library.","main":"source/Fable.js","scripts":{"start":"node source/Fable.js","coverage":"npx quack coverage","test":"npx quack test","build":"npx quack build","prepublishOnly":"npx quack build","docker-dev-build":"docker build ./ -f Dockerfile_LUXURYCode -t fable-image:local","docker-dev-run":"docker run -it -d --name fable-dev -p 30001:8080 -p 38086:8086 -v \"$PWD/.config:/home/coder/.config\"  -v \"$PWD:/home/coder/fable\" -u \"$(id -u):$(id -g)\" -e \"DOCKER_USER=$USER\" fable-image:local","docker-dev-shell":"docker exec -it fable-dev /bin/bash","tests":"npx quack test -g"},"mocha":{"diff":true,"extension":["js"],"package":"./package.json","reporter":"spec","slow":"75","timeout":"5000","ui":"tdd","watch-files":["source/**/*.js","test/**/*.js"],"watch-ignore":["lib/vendor"]},"browser":{"./source/service/Fable-Service-EnvironmentData.js":"./source/service/Fable-Service-EnvironmentData-Web.js","./source/service/Fable-Service-FilePersistence.js":"./source/service/Fable-Service-FilePersistence-Web.js"},"repository":{"type":"git","url":"https://github.com/fable-retold/fable.git"},"keywords":["entity","behavior"],"author":"Steven Velozo <steven@velozo.com> (http://velozo.com/)","license":"MIT","bugs":{"url":"https://github.com/fable-retold/fable/issues"},"homepage":"https://github.com/fable-retold/fable","devDependencies":{"pict-docuserve":"^1.4.19","quackage":"^1.3.0"},"dependencies":{"async.eachlimit":"^0.5.2","async.waterfall":"^0.5.2","big.js":"^7.0.1","cachetrax":"^1.0.6","cookie":"^1.1.1","data-arithmatic":"^1.0.7","dayjs":"^1.11.19","fable-log":"^3.0.18","fable-serviceproviderbase":"^3.0.19","fable-settings":"^3.0.17","fable-uuid":"^3.0.15","manyfest":"^1.0.49","simple-get":"^4.0.1"}};},{}],150:[function(require,module,exports){/**
 * Fable Application Services Support Library
 * @author <steven@velozo.com>
 */// Pre-init services
@@ -5321,11 +5321,22 @@ else{return`ProgressTracker ${tmpProgressTracker.Hash} is done.  ${tmpProgressTr
  * @property {number} AttemptsMade - Attempts made so far, including this one.
  * @property {number|null} [DelayMS] - Backoff before the pending replay; null when settling.
  *//**
+ * @typedef {Object} RestClientRetrySafetyContext
+ * @property {Record<string, any>} Options - The request under consideration. No response exists yet:
+ *   safety is a property of the request, not of how it turned out.
+ * @property {RestClientRetryPolicy} Policy - The resolved policy for this request.
+ *//**
  * Attempt count used when retry is switched on without an explicit budget
  * (`Retry: true`). One original attempt plus two replays.
  *
  * @type {number}
  */const ENABLED_RETRY_ATTEMPTS=3;/**
+ * Chain length at which unkeyed hook registration is called out as probable lifecycle churn. High
+ * enough that a legitimately layered application never trips it, low enough to surface a leak long
+ * before it matters.
+ *
+ * @type {number}
+ */const RETRY_HOOK_CHAIN_WARNING_LENGTH=32;/**
  * Statuses defined to carry no message body (RFC 7231 §6.3.5, §6.3.6; RFC 7232
  * §4.1). An empty body on one of these is the contract, not a parse failure.
  *
@@ -5396,7 +5407,23 @@ this.detachedThrowFunction=pDetachedError=>{setTimeout(()=>{throw pDetachedError
 //       }
 //       return null;
 //   };
-/** @type {((pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined))|null} */this.retryClassifier=typeof this.options.RetryClassifier==='function'?this.options.RetryClassifier:null;// Lifecycle hooks. Both may be async and are awaited, so a hook can do
+/** @type {((pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined))|null} */this.retryClassifier=typeof this.options.RetryClassifier==='function'?this.options.RetryClassifier:null;// Decision-hook chains. Both are consulted in registration order, ahead of
+// the built-in rule that tails each chain; a hook returns a verdict to
+// decide or nothing to defer to whatever comes after it. Registering is
+// how a library teaches the client about its own routes without every call
+// site having to remember to say so -- pict registers the meadow
+// POST /:Entity/Query route as replayable, and nothing that borrows the
+// client needs to know it did.
+//
+// Safety ("may this be replayed at all") and classification ("was this
+// outcome transient") are kept apart on purpose. Safety is a hard gate
+// above classification, so no classification hook can ever authorize
+// replaying a mutation.
+//
+// Hooks must be synchronous -- they run inline while the outcome is being
+// decided. The lifecycle hooks (onBeforeRetry / onRetryExhausted) are the
+// async ones, because those do work rather than answer questions.
+/** @type {Array<(pContext: RestClientRetrySafetyContext) => (boolean|null|undefined)>} */this.retrySafetyHooks=[];/** @type {Array<(pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined)>} */this.retryClassifierHooks=[];// Lifecycle hooks. Both may be async and are awaited, so a hook can do
 // real work before the replay goes out -- refresh a stream handle or a
 // token, re-sign a URL, bump a metric. The context's `Options` object IS
 // the one about to be replayed, so mutating it (headers, url, body)
@@ -5405,6 +5432,55 @@ this.detachedThrowFunction=pDetachedError=>{setTimeout(()=>{throw pDetachedError
 // onBeforeRetry additionally acts as a veto: resolving exactly false
 // abandons the retry and settles with the outcome in hand.
 /** @type {((pContext: RestClientRetryContext) => any)|null} */this.onBeforeRetry=typeof this.options.OnBeforeRetry==='function'?this.options.OnBeforeRetry:null;/** @type {((pContext: RestClientRetryContext) => any)|null} */this.onRetryExhausted=typeof this.options.OnRetryExhausted==='function'?this.options.OnRetryExhausted:null;}/**
+	 * Register a safety hook: given a request, may it be replayed?
+	 *
+	 * Return `true` (replayable) or `false` (never replay) to decide, or nothing to defer to the
+	 * next hook and finally to the built-in idempotent-method rule. Hooks run in registration
+	 * order, ahead of that rule.
+	 *
+	 * @param {(pContext: RestClientRetrySafetyContext) => (boolean|null|undefined)} fHook - The hook.
+	 * @return {() => void} A disposer that removes the hook.
+	 */addRetrySafetyHook(fHook,pKey){return this._registerDecisionHook(this.retrySafetyHooks,fHook,pKey,'addRetrySafetyHook');}/**
+	 * Register a classification hook: given a settled request, was the outcome transient?
+	 *
+	 * Return `'retry'` or `'settle'` to decide, or nothing to defer to the next hook and finally
+	 * to the built-in status-code and transport-error-code rules.
+	 *
+	 * @param {(pContext: RestClientRetryContext) => ('retry'|'settle'|null|undefined)} fHook - The hook.
+	 * @return {() => void} A disposer that removes the hook.
+	 */addRetryClassifierHook(fHook,pKey){return this._registerDecisionHook(this.retryClassifierHooks,fHook,pKey,'addRetryClassifierHook');}/**
+	 * Add a hook to a decision chain, keyed so re-registration is idempotent.
+	 *
+	 * A REST client lives as long as the application; a view that customizes retry behavior lives
+	 * as long as its route is mounted. Those lifecycles do not line up, and a view that registers
+	 * on mount will register again on every remount -- an unmount-time disposer only helps if it is
+	 * reliably called, and a hook written as an inline arrow is a fresh reference each time, so
+	 * identity alone cannot deduplicate it.
+	 *
+	 * Passing a stable `pKey` makes registration idempotent: the entry is replaced in place,
+	 * preserving its position in the chain so ordering does not drift across remounts. Unkeyed
+	 * registration still appends, for one-shot setup that genuinely runs once.
+	 *
+	 * @param {Array<{ Key: (string|null), Hook: Function }>} pChain - The chain to register into.
+	 * @param {Function} fHook - The hook.
+	 * @param {string} [pKey] - Stable identity for the registrant.
+	 * @param {string} pMethodName - Caller name, for the error message.
+	 * @return {() => void} A disposer that removes this registration.
+	 * @private
+	 */_registerDecisionHook(pChain,fHook,pKey,pMethodName){if(typeof fHook!=='function'){throw new Error(`RestClient ${pMethodName} requires a function.`);}const tmpKey=typeof pKey==='string'&&pKey.length>0?pKey:null;const tmpEntry={Key:tmpKey,Hook:fHook};if(tmpKey){const tmpExistingIndex=pChain.findIndex(pCandidate=>pCandidate.Key===tmpKey);if(tmpExistingIndex>-1){pChain[tmpExistingIndex]=tmpEntry;return()=>{const tmpIndex=pChain.indexOf(tmpEntry);if(tmpIndex>-1){pChain.splice(tmpIndex,1);}};}}pChain.push(tmpEntry);// Unkeyed registrations cannot be deduplicated, so a lifecycle mismatch
+// shows up here as unbounded growth. Say so once rather than letting it
+// degrade quietly.
+if(pChain.length===RETRY_HOOK_CHAIN_WARNING_LENGTH){this.fable.log.warn(`RestClient ${pMethodName} chain has reached ${pChain.length} entries; a caller is probably registering on a lifecycle the client does not share. Pass a stable key to make registration idempotent.`,{Action:'RestClientRetryHookChainGrowth',Method:pMethodName,Length:pChain.length});}return()=>{const tmpIndex=pChain.indexOf(tmpEntry);if(tmpIndex>-1){pChain.splice(tmpIndex,1);}};}/**
+	 * Run a decision-hook chain, stopping at the first hook that decides. A hook that throws is
+	 * logged and treated as a deferral, so broken application code degrades to the built-in rule
+	 * rather than breaking every request through the client.
+	 *
+	 * @param {Array<Function>} pHooks - The chain, in call order.
+	 * @param {Object} pContext - The context handed to each hook.
+	 * @param {(pVerdict: *) => boolean} fIsDecision - Whether a returned value counts as a decision.
+	 * @param {string} pChainName - Name used in the failure log.
+	 * @return {*} The deciding verdict, or undefined when every hook deferred.
+	 */_runDecisionHookChain(pHooks,pContext,fIsDecision,pChainName){if(!Array.isArray(pHooks)){return undefined;}for(let i=0;i<pHooks.length;i++){let tmpVerdict;try{tmpVerdict=pHooks[i].Hook(pContext);}catch(pHookError){this.fable.log.warn(`RestClient ${pChainName} hook ${i} threw; deferring: ${pHookError.message}`,{Action:'RestClientRetryHookError',Chain:pChainName,Index:i});continue;}if(fIsDecision(tmpVerdict)){return tmpVerdict;}}return undefined;}/**
 	 * Invoke a function from inside a promise continuation without letting its
 	 * exceptions change shape.
 	 *
@@ -5454,7 +5530,11 @@ this.detachedThrowFunction=pDetachedError=>{setTimeout(()=>{throw pDetachedError
 	 *
 	 * @param {RestClientRetryContext} pContext - The outcome context.
 	 * @return {string|null} 'retry', 'settle', or null for no opinion.
-	 */_classifyRetryOutcome(pContext){const fClassifier=this._resolveRetryClassifier(pContext.Options);if(!fClassifier){return null;}let tmpVerdict;try{tmpVerdict=fClassifier(pContext);}catch(pClassifierError){this.fable.log.warn(`RestClient retry classifier threw; deferring to the stock policy: ${pClassifierError.message}`,{Action:'RestClientRetryClassifierError'});return null;}if(tmpVerdict==='retry'||tmpVerdict==='settle'){return tmpVerdict;}return null;}/**
+	 */_classifyRetryOutcome(pContext){// Effective chain, most specific first: the per-request classifier, the
+// single-slot `retryClassifier` (kept so pre-chain callers keep working),
+// then every registered hook in registration order. `RetryClassifier:
+// false` on a request opts that request out of all of them.
+const tmpChain=[];const tmpRequestOptions=pContext.Options;if(tmpRequestOptions&&typeof tmpRequestOptions.RetryClassifier==='function'){tmpChain.push({Key:null,Hook:tmpRequestOptions.RetryClassifier});}else if(!tmpRequestOptions||tmpRequestOptions.RetryClassifier!==false){if(typeof this.retryClassifier==='function'){tmpChain.push({Key:null,Hook:this.retryClassifier});}for(let i=0;i<this.retryClassifierHooks.length;i++){tmpChain.push(this.retryClassifierHooks[i]);}}const tmpVerdict=this._runDecisionHookChain(tmpChain,pContext,pCandidate=>pCandidate==='retry'||pCandidate==='settle','retryClassifier');return typeof tmpVerdict==='undefined'?null:tmpVerdict;}/**
 	 * Layer retry configuration fragments onto the stock policy. Each fragment
 	 * may be an object of overrides, a number (shorthand for MaxAttempts), or
 	 * `false`/`0` (shorthand for "no retries"). Unrecognized fragments are
@@ -5463,6 +5543,15 @@ this.detachedThrowFunction=pDetachedError=>{setTimeout(()=>{throw pDetachedError
 	 * @param {...(Partial<RestClientRetryPolicy>|number|boolean|null|undefined)} pFragments - Overrides applied in order, later winning.
 	 * @return {RestClientRetryPolicy} The resolved policy.
 	 */_buildRetryPolicy(){let tmpPolicy=Object.assign({},DEFAULT_RETRY_POLICY);for(let i=0;i<arguments.length;i++){const tmpFragment=i<0||arguments.length<=i?undefined:arguments[i];if(tmpFragment===null||typeof tmpFragment==='undefined'){continue;}if(tmpFragment===false){tmpPolicy.MaxAttempts=1;continue;}if(tmpFragment===true){tmpPolicy.MaxAttempts=ENABLED_RETRY_ATTEMPTS;continue;}if(typeof tmpFragment==='number'){tmpPolicy.MaxAttempts=Math.max(1,tmpFragment);continue;}if(typeof tmpFragment==='object'){tmpPolicy=Object.assign(tmpPolicy,tmpFragment);}}if(typeof tmpPolicy.MaxAttempts!=='number'||tmpPolicy.MaxAttempts<1){tmpPolicy.MaxAttempts=1;}return tmpPolicy;}/**
+	 * Layer retry configuration onto this client's policy, in place.
+	 *
+	 * The public way for a library or application to turn retry on (or tune it) after construction.
+	 * Accepts the same forms as the constructor option: an overrides object, a number of attempts,
+	 * `true` for the recommended budget, or `false` to disable.
+	 *
+	 * @param {Partial<RestClientRetryPolicy>|number|boolean} pRetryConfiguration - The overrides.
+	 * @return {RestClientRetryPolicy} The resolved policy now in effect.
+	 */configureRetry(pRetryConfiguration){this.retryPolicy=this._buildRetryPolicy(this.retryPolicy,pRetryConfiguration);return this.retryPolicy;}/**
 	 * Resolve the effective policy for a single request: the service policy with
 	 * any per-request `Retry` override layered on top.
 	 *
@@ -5479,7 +5568,10 @@ this.detachedThrowFunction=pDetachedError=>{setTimeout(()=>{throw pDetachedError
 	 * @param {Record<string, any>} pRequestOptions - The request options.
 	 * @param {RestClientRetryPolicy} pPolicy - The resolved policy.
 	 * @return {boolean} True when this request is safe to replay.
-	 */_isRetryableRequest(pRequestOptions,pPolicy){if(!pRequestOptions){return false;}const tmpBody=pRequestOptions.body;if(tmpBody&&(typeof tmpBody.pipe==='function'||typeof Blob!=='undefined'&&tmpBody instanceof Blob)){return false;}if(pRequestOptions.RetrySafe===true){return true;}if(pRequestOptions.RetrySafe===false){return false;}const tmpMethod=(pRequestOptions.method||'GET').toUpperCase();return Array.isArray(pPolicy.RetryMethods)&&pPolicy.RetryMethods.indexOf(tmpMethod)>-1;}/**
+	 */_isRetryableRequest(pRequestOptions,pPolicy){if(!pRequestOptions){return false;}const tmpBody=pRequestOptions.body;if(tmpBody&&(typeof tmpBody.pipe==='function'||typeof Blob!=='undefined'&&tmpBody instanceof Blob)){return false;}// A per-request assertion is the most specific statement there is, so it
+// outranks every hook. This is the override role; it is not how a whole
+// class of endpoints should be described (register a hook for that).
+if(pRequestOptions.RetrySafe===true){return true;}if(pRequestOptions.RetrySafe===false){return false;}const tmpHookVerdict=this._runDecisionHookChain(this.retrySafetyHooks,{Options:pRequestOptions,Policy:pPolicy},pVerdict=>typeof pVerdict==='boolean','retrySafety');if(typeof tmpHookVerdict==='boolean'){return tmpHookVerdict;}const tmpMethod=(pRequestOptions.method||'GET').toUpperCase();return Array.isArray(pPolicy.RetryMethods)&&pPolicy.RetryMethods.indexOf(tmpMethod)>-1;}/**
 	 * Parse a Retry-After header into milliseconds. Handles both the delta-seconds
 	 * and the HTTP-date forms defined by RFC 7231 §7.1.3.
 	 *

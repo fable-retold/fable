@@ -1328,6 +1328,342 @@ suite
 
 			suite
 				(
+					'Decision Hook Chains',
+					function ()
+					{
+						test
+							(
+								'A safety hook makes a whole class of POSTs replayable without touching call sites.',
+								function (fTestComplete)
+								{
+									// The motivating case: meadow's POST /:Entity/Query is a read.
+									// A library registers that fact once; nothing that borrows the
+									// client has to stamp anything per request.
+									let tmpState = { Requests: [] };
+									createScriptedServer([ { Status: 502 }, { Status: 200, Body: JSON.stringify([ { IDBook: 1 } ]) } ], tmpState,
+										(pServer, pPort) =>
+										{
+											let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 } });
+											tmpHarness.Client.addRetrySafetyHook((pContext) =>
+											{
+												return /\/Query(?:$|[/?])/.test(pContext.Options.url || '') ? true : undefined;
+											});
+											tmpHarness.Client.postJSON({ url: `http://127.0.0.1:${pPort}/Books/Query`, body: { Filter: 'x' } },
+												(pError, pResponse, pBody) =>
+												{
+													Expect(pResponse.statusCode).to.equal(200);
+													Expect(pBody).to.deep.equal([ { IDBook: 1 } ]);
+													Expect(tmpState.Requests.length).to.equal(2);
+													pServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'The same hook leaves writes alone.',
+								function (fTestComplete)
+								{
+									let tmpState = { Requests: [] };
+									createScriptedServer([ { Status: 502 }, { Status: 200 } ], tmpState,
+										(pServer, pPort) =>
+										{
+											let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 } });
+											tmpHarness.Client.addRetrySafetyHook((pContext) =>
+											{
+												return /\/Query(?:$|[/?])/.test(pContext.Options.url || '') ? true : undefined;
+											});
+											tmpHarness.Client.postJSON({ url: `http://127.0.0.1:${pPort}/Books`, body: { Name: 'x' } },
+												(pError, pResponse) =>
+												{
+													Expect(pResponse.statusCode).to.equal(502);
+													Expect(tmpState.Requests.length).to.equal(1);
+													pServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'Safety hooks run in registration order and the first decision wins.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpCalls = [];
+									tmpClient.addRetrySafetyHook(() => { tmpCalls.push('first'); return undefined; });
+									tmpClient.addRetrySafetyHook(() => { tmpCalls.push('second'); return true; });
+									tmpClient.addRetrySafetyHook(() => { tmpCalls.push('third'); return false; });
+									Expect(tmpClient._isRetryableRequest({ method: 'POST' }, tmpClient.retryPolicy)).to.equal(true);
+									Expect(tmpCalls).to.deep.equal([ 'first', 'second' ]);
+								}
+							);
+
+						test
+							(
+								'A safety hook can also veto an otherwise idempotent request.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									tmpClient.addRetrySafetyHook((pContext) =>
+									{
+										return (pContext.Options.url || '').indexOf('/Expensive') > -1 ? false : undefined;
+									});
+									Expect(tmpClient._isRetryableRequest({ method: 'GET', url: '/Expensive/Report' }, tmpClient.retryPolicy)).to.equal(false);
+									Expect(tmpClient._isRetryableRequest({ method: 'GET', url: '/Cheap' }, tmpClient.retryPolicy)).to.equal(true);
+								}
+							);
+
+						test
+							(
+								'Per-request RetrySafe outranks every safety hook.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpCalled = false;
+									tmpClient.addRetrySafetyHook(() => { tmpCalled = true; return true; });
+									Expect(tmpClient._isRetryableRequest({ method: 'POST', RetrySafe: false }, tmpClient.retryPolicy)).to.equal(false);
+									Expect(tmpCalled).to.equal(false);
+								}
+							);
+
+						test
+							(
+								'An unreplayable body still wins over a safety hook saying yes.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									tmpClient.addRetrySafetyHook(() => true);
+									Expect(tmpClient._isRetryableRequest({ method: 'POST', body: { pipe: () => {} } }, tmpClient.retryPolicy)).to.equal(false);
+								}
+							);
+
+						test
+							(
+								'A throwing safety hook defers to the next rule rather than breaking the request.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									tmpClient.addRetrySafetyHook(() => { throw new Error('hook bug'); });
+									Expect(tmpClient._isRetryableRequest({ method: 'GET' }, tmpClient.retryPolicy)).to.equal(true);
+									Expect(tmpClient._isRetryableRequest({ method: 'POST' }, tmpClient.retryPolicy)).to.equal(false);
+								}
+							);
+
+						test
+							(
+								'Classifier hooks compose instead of clobbering one another.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpCalls = [];
+									tmpClient.addRetryClassifierHook(() => { tmpCalls.push('a'); return undefined; });
+									tmpClient.addRetryClassifierHook(() => { tmpCalls.push('b'); return 'retry'; });
+									Expect(tmpClient._classifyRetryOutcome({ Options: {} })).to.equal('retry');
+									Expect(tmpCalls).to.deep.equal([ 'a', 'b' ]);
+								}
+							);
+
+						test
+							(
+								'The single-slot classifier still runs, ahead of registered hooks.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpCalls = [];
+									tmpClient.retryClassifier = () => { tmpCalls.push('slot'); return undefined; };
+									tmpClient.addRetryClassifierHook(() => { tmpCalls.push('hook'); return 'settle'; });
+									Expect(tmpClient._classifyRetryOutcome({ Options: {} })).to.equal('settle');
+									Expect(tmpCalls).to.deep.equal([ 'slot', 'hook' ]);
+								}
+							);
+
+						test
+							(
+								'A per-request classifier replaces the chain; RetryClassifier:false disables it.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpChainCalled = false;
+									tmpClient.addRetryClassifierHook(() => { tmpChainCalled = true; return 'retry'; });
+
+									Expect(tmpClient._classifyRetryOutcome({ Options: { RetryClassifier: () => 'settle' } })).to.equal('settle');
+									Expect(tmpChainCalled).to.equal(false);
+
+									Expect(tmpClient._classifyRetryOutcome({ Options: { RetryClassifier: false } })).to.equal(null);
+									Expect(tmpChainCalled).to.equal(false);
+								}
+							);
+
+						test
+							(
+								'A classification hook still cannot authorize replaying a mutation.',
+								function (fTestComplete)
+								{
+									// The hard gate: safety is decided before classification, so a
+									// hook calling an outcome transient cannot make a POST replay.
+									let tmpState = { Requests: [] };
+									createScriptedServer([ { Status: 502 }, { Status: 200 } ], tmpState,
+										(pServer, pPort) =>
+										{
+											let tmpHarness = makeClient({ Retry: { MaxAttempts: 3, InitialDelayMS: 1 } });
+											tmpHarness.Client.addRetryClassifierHook(() => 'retry');
+											tmpHarness.Client.postJSON({ url: `http://127.0.0.1:${pPort}/Books`, body: { Name: 'x' } },
+												(pError, pResponse) =>
+												{
+													Expect(pResponse.statusCode).to.equal(502);
+													Expect(tmpState.Requests.length).to.equal(1);
+													pServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'Registration returns a disposer that removes the hook.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									const fDisposeSafety = tmpClient.addRetrySafetyHook(() => true);
+									const fDisposeClassifier = tmpClient.addRetryClassifierHook(() => 'retry');
+									Expect(tmpClient._isRetryableRequest({ method: 'POST' }, tmpClient.retryPolicy)).to.equal(true);
+									Expect(tmpClient._classifyRetryOutcome({ Options: {} })).to.equal('retry');
+
+									fDisposeSafety();
+									fDisposeClassifier();
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(0);
+									Expect(tmpClient.retryClassifierHooks.length).to.equal(0);
+									Expect(tmpClient._isRetryableRequest({ method: 'POST' }, tmpClient.retryPolicy)).to.equal(false);
+									Expect(tmpClient._classifyRetryOutcome({ Options: {} })).to.equal(null);
+								}
+							);
+
+						test
+							(
+								'A keyed hook re-registered on every remount leaves exactly one entry.',
+								function ()
+								{
+									// The degenerate case: a view registers on mount, its route is
+									// visited fifty times, and nobody calls the disposer.
+									let tmpClient = makeClient().Client;
+									for (let i = 0; i < 50; i++)
+									{
+										// A fresh arrow each time, as an inline hook would be —
+										// identity dedup could not catch this.
+										tmpClient.addRetrySafetyHook((pContext) => ((pContext.Options.url === '/x') ? true : undefined), 'MyView');
+									}
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(1);
+									Expect(tmpClient._isRetryableRequest({ method: 'POST', url: '/x' }, tmpClient.retryPolicy)).to.equal(true);
+								}
+							);
+
+						test
+							(
+								'Re-registration replaces in place, so chain order does not drift.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpCalls = [];
+									tmpClient.addRetrySafetyHook(() => { tmpCalls.push('first'); return undefined; }, 'A');
+									tmpClient.addRetrySafetyHook(() => { tmpCalls.push('second'); return undefined; }, 'B');
+									// A remounts; it must stay ahead of B rather than jumping to the end.
+									tmpClient.addRetrySafetyHook(() => { tmpCalls.push('first-again'); return undefined; }, 'A');
+									tmpClient._isRetryableRequest({ method: 'GET' }, tmpClient.retryPolicy);
+									Expect(tmpCalls).to.deep.equal([ 'first-again', 'second' ]);
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(2);
+								}
+							);
+
+						test
+							(
+								'Distinct keys coexist, and the latest hook body is the one that runs.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									tmpClient.addRetryClassifierHook(() => undefined, 'ViewOne');
+									tmpClient.addRetryClassifierHook(() => undefined, 'ViewTwo');
+									Expect(tmpClient.retryClassifierHooks.length).to.equal(2);
+									tmpClient.addRetryClassifierHook(() => 'settle', 'ViewTwo');
+									Expect(tmpClient.retryClassifierHooks.length).to.equal(2);
+									Expect(tmpClient._classifyRetryOutcome({ Options: {} })).to.equal('settle');
+								}
+							);
+
+						test
+							(
+								'A keyed disposer removes only its own entry.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									tmpClient.addRetrySafetyHook(() => undefined, 'Keep');
+									const fDispose = tmpClient.addRetrySafetyHook(() => true, 'Drop');
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(2);
+									fDispose();
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(1);
+									Expect(tmpClient.retrySafetyHooks[0].Key).to.equal('Keep');
+								}
+							);
+
+						test
+							(
+								'A superseded registration disposer does not remove its replacement.',
+								function ()
+								{
+									// A remounted view holds a stale disposer from a previous mount;
+									// firing it late must not silently unregister the live hook.
+									let tmpClient = makeClient().Client;
+									const fStaleDispose = tmpClient.addRetrySafetyHook(() => undefined, 'MyView');
+									tmpClient.addRetrySafetyHook(() => true, 'MyView');
+									fStaleDispose();
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(1);
+									Expect(tmpClient._isRetryableRequest({ method: 'POST' }, tmpClient.retryPolicy)).to.equal(true);
+								}
+							);
+
+						test
+							(
+								'Unkeyed registration still appends, and warns once when the chain runs away.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									let tmpWarnings = [];
+									tmpClient.fable.log.warn = (pMessage, pMeta) =>
+									{
+										if (pMeta && pMeta.Action === 'RestClientRetryHookChainGrowth')
+										{
+											tmpWarnings.push(pMeta);
+										}
+									};
+									for (let i = 0; i < 40; i++)
+									{
+										tmpClient.addRetrySafetyHook(() => undefined);
+									}
+									Expect(tmpClient.retrySafetyHooks.length).to.equal(40);
+									Expect(tmpWarnings.length).to.equal(1);
+									Expect(tmpWarnings[0].Length).to.equal(32);
+								}
+							);
+
+						test
+							(
+								'Registering a non-function is refused outright.',
+								function ()
+								{
+									let tmpClient = makeClient().Client;
+									Expect(() => tmpClient.addRetrySafetyHook('nope')).to.throw(/requires a function/);
+									Expect(() => tmpClient.addRetryClassifierHook(null)).to.throw(/requires a function/);
+								}
+							);
+					}
+				);
+
+			suite
+				(
 					'Interaction With Auth Recovery',
 					function ()
 					{
