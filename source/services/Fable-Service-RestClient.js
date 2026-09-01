@@ -1169,6 +1169,16 @@ class FableServiceRestClient extends libFableServiceBase
 
 				let tmpData = '';
 
+				// A body that stops mid-stream is reportable only here, and only as
+				// a transport failure -- see _guardResponseStream for why it hands the
+				// retry seam no response.
+				let fClaimSettle = this._guardResponseStream(pResponse,
+					(pInterruptedError) =>
+					{
+						return this._completeWithRetry(tmpReplayOptions, pInterruptedError, undefined, undefined,
+							() => this.executeChunkedRequest(tmpReplayOptions, fCallback), fCallback);
+					});
+
 				pResponse.on('data', (pChunk) =>
 					{
 						// For JSON, the chunk is the serialized object.
@@ -1182,6 +1192,10 @@ class FableServiceRestClient extends libFableServiceBase
 
 				pResponse.on('end', ()=>
 					{
+						if (!fClaimSettle())
+						{
+							return;
+						}
 						if (this.TraceLog)
 						{
 							let tmpCompletionTime = this.fable.log.getTimeStamp();
@@ -1226,6 +1240,16 @@ class FableServiceRestClient extends libFableServiceBase
 
 				let tmpDataBuffer = false;
 
+				// A body that stops mid-stream is reportable only here, and only as
+				// a transport failure -- see _guardResponseStream for why it hands the
+				// retry seam no response.
+				let fClaimSettle = this._guardResponseStream(pResponse,
+					(pInterruptedError) =>
+					{
+						return this._completeWithRetry(tmpReplayOptions, pInterruptedError, undefined, undefined,
+							() => this.executeChunkedRequestBinary(tmpReplayOptions, fCallback), fCallback);
+					});
+
 				pResponse.on('data', (pChunk) =>
 					{
 						// For JSON, the chunk is the serialized object.
@@ -1247,6 +1271,10 @@ class FableServiceRestClient extends libFableServiceBase
 
 				pResponse.on('end', ()=>
 					{
+						if (!fClaimSettle())
+						{
+							return;
+						}
 						if (this.TraceLog)
 						{
 							let tmpCompletionTime = this.fable.log.getTimeStamp();
@@ -1311,6 +1339,71 @@ class FableServiceRestClient extends libFableServiceBase
 				throw pError;
 			});
 		return this._authenticationRecoveryPromise;
+	}
+
+	/**
+	 * Arm terminal-failure listeners on a response stream being accumulated.
+	 *
+	 * simple-get hands the response over as soon as the headers land, and its
+	 * callback is once()-wrapped -- so by the time the body is streaming, the
+	 * only channel it has for reporting a failure is already spent. Anything
+	 * that goes wrong from that point (a peer reset, the socket our own request
+	 * timeout aborts, a premature close) surfaces solely on the response stream,
+	 * where the accumulators listen for 'data' and 'end' and nothing else. The
+	 * result is not an error but silence: 'end' never fires, the caller's
+	 * callback is never called, and the request hangs for as long as the process
+	 * lives. Every accumulating path arms this and claims the settle in its
+	 * 'end' handler, so exactly one of the two outcomes is delivered.
+	 *
+	 * Callers hand the resulting error to the retry seam with NO response, on
+	 * purpose. A status line describes headers that did arrive, not a body that
+	 * never did; letting a truncated response be classified as its own 200 would
+	 * decline exactly the replay its transport error code is asking for. The
+	 * caller receives the coded error either way.
+	 *
+	 * @param {Object} pResponse - The response stream being accumulated.
+	 * @param {(pError: Error) => void} fOnInterrupted - Settles the request; called at most once, and never once the outcome has been claimed.
+	 * @return {() => boolean} Claim function -- true the first time it is called, false once the outcome is already settled.
+	 * @private
+	 */
+	_guardResponseStream(pResponse, fOnInterrupted)
+	{
+		let tmpSettled = false;
+
+		let fClaimSettle = () =>
+		{
+			if (tmpSettled)
+			{
+				return false;
+			}
+			tmpSettled = true;
+			return true;
+		};
+
+		let fInterrupted = (pStreamError) =>
+		{
+			if (!fClaimSettle())
+			{
+				return;
+			}
+			// 'aborted' and 'close' carry no error of their own, and a stream
+			// error may arrive uncoded; ECONNRESET is what the transport matching
+			// in _evaluateRetryOutcome already understands as transient.
+			let tmpError = (pStreamError instanceof Error) ? pStreamError : new Error('Response stream closed before the body completed');
+			if (!tmpError.code)
+			{
+				tmpError.code = 'ECONNRESET';
+			}
+			return fOnInterrupted(tmpError);
+		};
+
+		pResponse.on('error', fInterrupted);
+		pResponse.on('aborted', () => { return fInterrupted(); });
+		// 'close' also fires on a clean response, after 'end' -- the claim taken
+		// by the 'end' handler absorbs it.
+		pResponse.on('close', () => { return fInterrupted(); });
+
+		return fClaimSettle;
 	}
 
 	/**
@@ -1509,6 +1602,16 @@ class FableServiceRestClient extends libFableServiceBase
 
 				let tmpJSONData = '';
 
+				// A body that stops mid-stream is reportable only here, and only as
+				// a transport failure -- see _guardResponseStream for why it hands the
+				// retry seam no response.
+				let fClaimSettle = this._guardResponseStream(pResponse,
+					(pInterruptedError) =>
+					{
+						return this._completeWithRetry(tmpReplayOptions, pInterruptedError, undefined, undefined,
+							() => this.executeJSONRequest(tmpReplayOptions, fCallback), fCallback);
+					});
+
 				pResponse.on('data', (pChunk) =>
 					{
 						if (this.TraceLog)
@@ -1521,6 +1624,10 @@ class FableServiceRestClient extends libFableServiceBase
 
 				pResponse.on('end', ()=>
 					{
+						if (!fClaimSettle())
+						{
+							return;
+						}
 						if (this.TraceLog)
 						{
 							let tmpCompletionTime = this.fable.log.getTimeStamp();
@@ -1701,6 +1808,16 @@ class FableServiceRestClient extends libFableServiceBase
 
 				let tmpData = '';
 
+				// A body that stops mid-stream is reportable only here, and only as
+				// a transport failure -- see _guardResponseStream for why it hands the
+				// retry seam no response.
+				let fClaimSettle = this._guardResponseStream(pResponse,
+					(pInterruptedError) =>
+					{
+						return this._completeWithRetry(tmpReplayOptions, pInterruptedError, undefined, undefined,
+							() => this._executeBinaryUploadInternal(tmpReplayOptions, fCallback, fOnProgress), fCallback);
+					});
+
 				pResponse.on('data', (pChunk) =>
 					{
 						if (this.TraceLog)
@@ -1713,6 +1830,10 @@ class FableServiceRestClient extends libFableServiceBase
 
 				pResponse.on('end', () =>
 					{
+						if (!fClaimSettle())
+						{
+							return;
+						}
 						if (this.TraceLog)
 						{
 							let tmpCompletionTime = this.fable.log.getTimeStamp();

@@ -1046,5 +1046,193 @@ suite
 							);
 					}
 				);
+
+			suite
+				(
+					'Interrupted Response Bodies',
+					function ()
+					{
+						// A response whose headers arrive and whose body then stops is
+						// the one shape simple-get cannot report: its callback is
+						// once()-wrapped and was already spent delivering the headers,
+						// so the socket timeout it raises later has nowhere to go. The
+						// body listeners have to settle these themselves or the caller
+						// waits forever. See "Request Timeout" for the pre-header cases.
+
+						test
+							(
+								'A body that stalls mid-stream settles with an error instead of hanging.',
+								function (fTestComplete)
+								{
+									// Headers plus one chunk, then silence -- no more data,
+									// no end, no FIN. This is the RIDOT liveconnect stall: an
+									// 8MB schema GET that wedged the clone for twelve days.
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse)
+										{
+											pResponse.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '10000' });
+											pResponse.write('{"Tables":');
+										});
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', { RequestTimeout: 250 }, 'RestClient-StalledBody');
+											tmpRestClient.getJSON('http://127.0.0.1:' + tmpServer.address().port + '/Schema',
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.be.an.instanceof(Error);
+													Expect(pError.code).to.equal('ECONNRESET');
+													tmpServer.close();
+													tmpServer.closeAllConnections();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'A body the server cuts off mid-stream settles with an error.',
+								function (fTestComplete)
+								{
+									// The same wound without waiting on a timeout: the peer
+									// destroys the socket after a partial body, so the only
+									// signals are on the response stream itself.
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse)
+										{
+											pResponse.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '10000' });
+											pResponse.write('{"Tables":');
+											// Cut on a later tick so the headers and the first chunk
+											// actually reach the client -- destroying in this tick
+											// fails before the response is delivered, which is the
+											// already-covered pre-header path, not this one.
+											setTimeout(function () { pResponse.socket.destroy(); }, 50);
+										});
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-CutBody');
+											tmpRestClient.getJSON('http://127.0.0.1:' + tmpServer.address().port + '/Schema',
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.be.an.instanceof(Error);
+													Expect(pError.code).to.equal('ECONNRESET');
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'A chunked (non-JSON) body that is cut off mid-stream settles with an error.',
+								function (fTestComplete)
+								{
+									// executeChunkedRequest accumulates its own body, so it
+									// needs the same guard as the JSON path.
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse)
+										{
+											pResponse.writeHead(200, { 'Content-Type': 'text/plain', 'Content-Length': '10000' });
+											pResponse.write('partial');
+											setTimeout(function () { pResponse.socket.destroy(); }, 50);
+										});
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-CutChunked');
+											tmpRestClient.executeChunkedRequest({ url: 'http://127.0.0.1:' + tmpServer.address().port + '/Report', method: 'GET' },
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.be.an.instanceof(Error);
+													Expect(pError.code).to.equal('ECONNRESET');
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+
+						test
+							(
+								'A clean response settles exactly once and carries no interruption error.',
+								function (fTestComplete)
+								{
+									// The guard must disarm on a normal completion: 'close'
+									// always follows 'end', and must not be read as a failure
+									// or fire the callback a second time.
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse) { pResponse.writeHead(200, { 'Content-Type': 'application/json' }); pResponse.end('{"Name":"Widget"}'); });
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', {}, 'RestClient-CleanOnce');
+											var tmpSettleCount = 0;
+											tmpRestClient.getJSON('http://127.0.0.1:' + tmpServer.address().port + '/Widget/1',
+												function (pError, pResponse, pBody)
+												{
+													tmpSettleCount++;
+													Expect(pError).to.equal(null);
+													Expect(pBody.Name).to.equal('Widget');
+												});
+											// Give 'close' (and any stray guard) room to land.
+											setTimeout(
+												function ()
+												{
+													Expect(tmpSettleCount).to.equal(1);
+													tmpServer.close();
+													fTestComplete();
+												}, 250);
+										});
+								}
+							);
+
+						test
+							(
+								'An interrupted body is retry-eligible and recovers on replay.',
+								function (fTestComplete)
+								{
+									// A cut body is a transport failure like any other, so it
+									// funnels through the same retry seam -- an idempotent GET
+									// replays and succeeds on the second attempt.
+									var tmpRequestCount = 0;
+									var tmpServer = libHTTP.createServer(
+										function (pRequest, pResponse)
+										{
+											tmpRequestCount++;
+											if (tmpRequestCount === 1)
+											{
+												pResponse.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': '10000' });
+												pResponse.write('{"Tables":');
+												return setTimeout(function () { pResponse.socket.destroy(); }, 50);
+											}
+											pResponse.writeHead(200, { 'Content-Type': 'application/json' });
+											return pResponse.end('{"Name":"Widget"}');
+										});
+									tmpServer.listen(0, '127.0.0.1',
+										function ()
+										{
+											var testFable = new libFable();
+											var tmpRestClient = testFable.instantiateServiceProvider('RestClient', { Retry: { MaxAttempts: 2, InitialDelayMS: 1, JitterRatio: 0 } }, 'RestClient-CutRetry');
+											tmpRestClient.getJSON('http://127.0.0.1:' + tmpServer.address().port + '/Widget/1',
+												function (pError, pResponse, pBody)
+												{
+													Expect(pError).to.equal(null);
+													Expect(pBody.Name).to.equal('Widget');
+													Expect(tmpRequestCount).to.equal(2);
+													tmpServer.close();
+													fTestComplete();
+												});
+										});
+								}
+							);
+					}
+				);
 		}
 	);
