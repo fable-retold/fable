@@ -45,6 +45,37 @@ function createGatedServer(pState, fReady)
 	tmpServer.listen(0, '127.0.0.1', () => { fReady(tmpServer, tmpServer.address().port); });
 }
 
+// A server that authorizes by cookie: 200 only when the request carries
+// `Session=<pState.ValidSession>`, 401 otherwise. While `pState.FailFirst` is
+// above zero it answers 503 instead (a transient failure) and counts down.
+// Every hit records the cookie and marker headers it arrived with.
+function createCookieGatedServer(pState, fReady)
+{
+	let tmpServer = libHTTP.createServer(
+		(pRequest, pResponse) =>
+		{
+			pState.Requests.push({ url: pRequest.url, method: pRequest.method, cookie: pRequest.headers.cookie || null, marker: pRequest.headers['x-test-marker'] || null });
+			pRequest.on('data', () => {});
+			pRequest.on('end', () =>
+			{
+				if (pState.FailFirst > 0)
+				{
+					pState.FailFirst--;
+					pResponse.writeHead(503, { 'Content-Type': 'application/json' });
+					return pResponse.end(JSON.stringify({ Error: 'Unavailable.' }));
+				}
+				if (pRequest.headers.cookie === `Session=${pState.ValidSession}`)
+				{
+					pResponse.writeHead(200, { 'Content-Type': 'application/json' });
+					return pResponse.end(JSON.stringify({ OK: true }));
+				}
+				pResponse.writeHead(401, { 'Content-Type': 'application/json' });
+				pResponse.end(JSON.stringify({ Error: 'Authentication required.' }));
+			});
+		});
+	tmpServer.listen(0, '127.0.0.1', () => { fReady(tmpServer, tmpServer.address().port); });
+}
+
 function makeClient()
 {
 	let tmpFable = new libFable();
@@ -315,6 +346,134 @@ suite
 										pServer.close(() => fTestComplete());
 									},
 									(pFraction) => { if (pFraction === 1.0) { tmpProgress++; } });
+							});
+					}
+				);
+
+			test
+				(
+					'Replay carries the cookie the recovery hook refreshed',
+					function (fTestComplete)
+					{
+						let tmpState = { ValidSession: 'fresh', FailFirst: 0, Requests: [] };
+						createCookieGatedServer(tmpState,
+							(pServer, pPort) =>
+							{
+								let tmpRestClient = makeClient();
+								tmpRestClient.cookie = { Session: 'expired' };
+								tmpRestClient.authenticationRecovery = () =>
+								{
+									tmpRestClient.cookie = { Session: 'fresh' };
+									return Promise.resolve(true);
+								};
+								tmpRestClient.getJSON({ url: `http://127.0.0.1:${pPort}/gated`, headers: { 'x-test-marker': 'kept' } },
+									(pError, pResponse, pBody) =>
+									{
+										Expect(tmpState.Requests.length).to.equal(2);
+										Expect(tmpState.Requests[0].cookie).to.equal('Session=expired');
+										Expect(tmpState.Requests[1].cookie).to.equal('Session=fresh');
+										// Caller headers other than the cookie travel on the replay too.
+										Expect(tmpState.Requests[1].marker).to.equal('kept');
+										Expect(pResponse.statusCode).to.equal(200);
+										Expect(pBody.OK).to.equal(true);
+										pServer.close(() => fTestComplete());
+									});
+							});
+					}
+				);
+
+			test
+				(
+					'A cookie header the caller supplied stays authoritative on replay',
+					function (fTestComplete)
+					{
+						let tmpState = { ValidSession: 'fresh', FailFirst: 0, Requests: [] };
+						createCookieGatedServer(tmpState,
+							(pServer, pPort) =>
+							{
+								let tmpRestClient = makeClient();
+								tmpRestClient.cookie = { Session: 'expired' };
+								tmpRestClient.authenticationRecovery = () =>
+								{
+									tmpRestClient.cookie = { Session: 'fresh' };
+									return Promise.resolve(true);
+								};
+								tmpRestClient.getJSON({ url: `http://127.0.0.1:${pPort}/gated`, headers: { cookie: 'Session=forwarded' } },
+									(pError, pResponse) =>
+									{
+										Expect(tmpState.Requests.length).to.equal(2);
+										Expect(tmpState.Requests[0].cookie).to.equal('Session=forwarded');
+										Expect(tmpState.Requests[1].cookie).to.equal('Session=forwarded');
+										Expect(pResponse.statusCode).to.equal(401);
+										pServer.close(() => fTestComplete());
+									});
+							});
+					}
+				);
+
+			test
+				(
+					'A request marked AuthenticationRecovery: false skips recovery, so the hook can call the same client',
+					function (fTestComplete)
+					{
+						let tmpState = { ValidSession: 'fresh', FailFirst: 0, Requests: [] };
+						createCookieGatedServer(tmpState,
+							(pServer, pPort) =>
+							{
+								let tmpRestClient = makeClient();
+								tmpRestClient.cookie = { Session: 'expired' };
+								let tmpRecoveryCalls = 0;
+								tmpRestClient.authenticationRecovery = () =>
+								{
+									tmpRecoveryCalls++;
+									// The hook's own probe is refused too; it must come straight back
+									// rather than wait on the recovery it is running inside.
+									return new Promise((fResolve) =>
+									{
+										tmpRestClient.getJSON({ url: `http://127.0.0.1:${pPort}/probe`, AuthenticationRecovery: false },
+											(pProbeError, pProbeResponse) =>
+											{
+												Expect(pProbeResponse.statusCode).to.equal(401);
+												fResolve(false);
+											});
+									});
+								};
+								tmpRestClient.getJSON({ url: `http://127.0.0.1:${pPort}/gated` },
+									(pError, pResponse) =>
+									{
+										Expect(pResponse.statusCode).to.equal(401);
+										Expect(tmpRecoveryCalls).to.equal(1);
+										Expect(tmpState.Requests.map((pRequest) => pRequest.url)).to.deep.equal([ '/gated', '/probe' ]);
+										pServer.close(() => fTestComplete());
+									});
+							});
+					}
+				);
+
+			test
+				(
+					'A transient-failure retry carries the current cookie',
+					function (fTestComplete)
+					{
+						let tmpState = { ValidSession: 'fresh', FailFirst: 1, Requests: [] };
+						createCookieGatedServer(tmpState,
+							(pServer, pPort) =>
+							{
+								let tmpRestClient = makeClient();
+								tmpRestClient.cookie = { Session: 'expired' };
+								tmpRestClient.onBeforeRetry = () =>
+								{
+									tmpRestClient.cookie = { Session: 'fresh' };
+								};
+								tmpRestClient.getJSON({ url: `http://127.0.0.1:${pPort}/gated`, headers: { 'x-test-marker': 'kept' }, Retry: { MaxAttempts: 2, InitialDelayMS: 1, JitterRatio: 0 } },
+									(pError, pResponse) =>
+									{
+										Expect(tmpState.Requests.length).to.equal(2);
+										Expect(tmpState.Requests[1].cookie).to.equal('Session=fresh');
+										Expect(tmpState.Requests[1].marker).to.equal('kept');
+										Expect(pResponse.statusCode).to.equal(200);
+										pServer.close(() => fTestComplete());
+									});
 							});
 					}
 				);

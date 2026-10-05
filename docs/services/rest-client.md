@@ -461,6 +461,53 @@ The `debug` line exists so that "retry was configured and declined to fire" is
 distinguishable from "retry was never configured" — without it, a
 misclassified failure is silent.
 
+## Authentication Recovery
+
+`authenticationRecovery` is an optional async hook for an expired session. It
+is `null` by default, so an unconfigured client returns a 401 as it arrives.
+When it is set and a request completes with a 401, the client awaits the hook:
+
+- resolving exactly `true` replays the original request once;
+- anything else (or a throw) hands the original 401 to the caller unchanged.
+
+```javascript
+const libFable = require('fable');
+const fable = new libFable({ Product: 'RestClientDemo', ProductVersion: '1.0.0' });
+const restClient = fable.instantiateServiceProvider('RestClient');
+
+restClient.authenticationRecovery = (pContext) =>
+{
+    // pContext.options is the request about to be replayed; pContext.response the 401.
+    return new Promise((fResolve) =>
+    {
+        restClient.postJSON({ url: '/login', body: { /* credentials */ }, AuthenticationRecovery: false },
+            (pError, pResponse, pBody) =>
+            {
+                if (pError || pResponse.statusCode !== 200)
+                {
+                    return fResolve(false);
+                }
+                restClient.cookie = { session: pBody.Session };
+                return fResolve(true);
+            });
+    });
+};
+```
+
+- **Single flight.** Concurrent 401s share one hook invocation, then each
+  replays on its own.
+- **One replay.** A replay never re-enters recovery, so a hook that resolves
+  `true` without fixing anything costs one extra request, not a loop.
+- **The replay sees the jar as it is after the hook.** A cookie the hook sets
+  on `restClient.cookie` travels on the replay. A `cookie` header the caller put
+  on the request options still wins (see Per-Request Cookie Override).
+- **Requests the hook makes through the same client** must carry
+  `AuthenticationRecovery: false`. Without it, a 401 on the hook's own request
+  waits on the recovery it belongs to and never settles.
+- **Mutations replay too.** A 401 normally means the server refused the request
+  before doing anything; a hook that cannot be sure of that for every route
+  should verify the session is really gone before resolving `true`.
+
 ## Custom Request Preparation
 
 Override the `prepareRequestOptions` function to modify all outgoing requests:

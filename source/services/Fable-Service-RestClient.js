@@ -1287,18 +1287,27 @@ class FableServiceRestClient extends libFableServiceBase
 	}
 
 	/**
-	 * Shallow-snapshot the caller's options BEFORE preRequest mutates them, so a
+	 * Snapshot the caller's options BEFORE preRequest mutates them, so a
 	 * recovery replay can re-run the same request cleanly. preRequest prepends
 	 * RestClientURLPrefix to `url` in place; replaying the already-mutated object
 	 * would double-prefix. Replaying from this snapshot re-runs preRequest once.
 	 *
+	 * `headers` is copied as well: preRequest decorates it in place with the
+	 * client's cookie jar, and a replay sharing that object would resend the
+	 * cookie of the first attempt instead of the jar as it stands at replay time.
+	 *
 	 * @param {Object} pOptions - The caller's request options.
-	 * @return {Object} A shallow copy safe to re-issue.
+	 * @return {Object} A copy safe to re-issue.
 	 * @private
 	 */
 	_captureReplayOptions(pOptions)
 	{
-		return Object.assign({}, pOptions);
+		let tmpReplayOptions = Object.assign({}, pOptions);
+		if (pOptions && pOptions.headers && (typeof(pOptions.headers) === 'object'))
+		{
+			tmpReplayOptions.headers = Object.assign({}, pOptions.headers);
+		}
+		return tmpReplayOptions;
 	}
 
 	/**
@@ -1408,7 +1417,9 @@ class FableServiceRestClient extends libFableServiceBase
 
 	/**
 	 * Shared completion seam for every request path. On a completed 401, with a
-	 * recovery hook installed, on a request that is not itself already a replay,
+	 * recovery hook installed, on a request that is not itself already a replay
+	 * and not marked `AuthenticationRecovery: false` (a request the hook issues
+	 * itself, which would otherwise wait on the recovery it is part of),
 	 * it awaits recovery: on success it replays the request exactly once (via
 	 * fReplay, whose pReplayOptions carry the __authRetry marker so the replay can
 	 * never re-enter recovery -- a hard one-retry cap); otherwise it delivers the
@@ -1425,7 +1436,7 @@ class FableServiceRestClient extends libFableServiceBase
 	 */
 	_completeWithRecovery(pReplayOptions, pError, pResponse, pBody, fReplay, fCallback)
 	{
-		if (pResponse && pResponse.statusCode === 401 && typeof this.authenticationRecovery === 'function' && !pReplayOptions.__authRetry)
+		if (pResponse && pResponse.statusCode === 401 && typeof this.authenticationRecovery === 'function' && !pReplayOptions.__authRetry && (pReplayOptions.AuthenticationRecovery !== false))
 		{
 			// Stamp the one-retry marker before recovery so the replay can never
 			// itself trigger another recovery pass.
