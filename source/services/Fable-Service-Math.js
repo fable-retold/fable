@@ -75,6 +75,27 @@ class FableServiceMath extends libFableServiceBase
 	}
 
 	/**
+	 * The operand a precise operation works on.  Non-numbers count as 0, and so do empty or whitespace-only
+	 * text, null, undefined and false, which isNaN() lets through but the arbitrary-precision library rejects.
+	 *
+	 * @param {any} pValue - The operand.
+	 * @returns {any} - The operand (text trimmed), or 0.
+	 */
+	preciseOperand(pValue)
+	{
+		if ((pValue === null) || (typeof (pValue) === 'undefined') || (pValue === false))
+		{
+			return 0;
+		}
+		const tmpValue = (typeof (pValue) === 'string') ? pValue.trim() : pValue;
+		if ((tmpValue === '') || isNaN(tmpValue))
+		{
+			return 0;
+		}
+		return tmpValue;
+	}
+
+	/**
 	 * Assigns the given value.  For equals operations in the solver.
 	 * @param {*} pValue - The value to be assigned.
 	 * @returns {*} The assigned value.
@@ -103,8 +124,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	percentagePrecise(pIs, pOf)
 	{
-		let tmpLeftValue = isNaN(pIs) ? 0 : pIs;
-		let tmpRightValue = isNaN(pOf) ? 0 : pOf;
+		let tmpLeftValue = this.preciseOperand(pIs);
+		let tmpRightValue = this.preciseOperand(pOf);
 
 		if (tmpRightValue == 0)
 		{
@@ -143,7 +164,7 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	roundPrecise(pValue, pDecimals, pRoundingMethod)
 	{
-		let tmpValue = pValue === false || isNaN(pValue) ? 0 : pValue;
+		let tmpValue = this.preciseOperand(pValue);
 		let tmpDecimals = isNaN(pDecimals) ? 0 : parseInt(pDecimals, 10);
 		let tmpRoundingMethod = (typeof (pRoundingMethod) === 'undefined') ? this.roundHalfUp : parseInt(pRoundingMethod, 10);
 
@@ -169,7 +190,7 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	toFixedPrecise(pValue, pDecimals, pRoundingMethod)
 	{
-		let tmpValue = pValue === false || isNaN(pValue) ? 0 : pValue;
+		let tmpValue = this.preciseOperand(pValue);
 		let tmpDecimals = isNaN(pDecimals) ? 0 : parseInt(pDecimals, 10);
 		let tmpRoundingMethod = (typeof (pRoundingMethod) === 'undefined') ? this.roundHalfUp : pRoundingMethod;
 
@@ -193,8 +214,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	addPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		let tmpResult = tmpLeftArbitraryValue.plus(tmpRightValue);
@@ -210,8 +231,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	subtractPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		let tmpResult = tmpLeftArbitraryValue.minus(tmpRightValue);
@@ -227,8 +248,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	powerPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : parseInt(pRightValue);
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = parseInt(this.preciseOperand(pRightValue));
 		let tmpResult;
 		if (tmpRightValue == Number(pRightValue))
 		{
@@ -253,8 +274,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	multiplyPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		let tmpResult = tmpLeftArbitraryValue.times(tmpRightValue);
@@ -270,8 +291,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	dividePrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		let tmpResult = tmpLeftArbitraryValue.div(tmpRightValue);
@@ -287,8 +308,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	modPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		let tmpResult = tmpLeftArbitraryValue.mod(tmpRightValue);
@@ -303,7 +324,7 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	sqrtPrecise(pValue)
 	{
-		let tmpValue = isNaN(pValue) ? 0 : pValue;
+		let tmpValue = this.preciseOperand(pValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpValue);
 		let tmpResult = tmpLeftArbitraryValue.sqrt();
@@ -318,7 +339,7 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	absPrecise(pValue)
 	{
-		let tmpValue = isNaN(pValue) ? 0 : pValue;
+		let tmpValue = this.preciseOperand(pValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpValue);
 		let tmpResult = tmpLeftArbitraryValue.abs();
@@ -386,7 +407,7 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	floorPrecise(pValue)
 	{
-		let tmpValue = isNaN(pValue) ? 0 : pValue;
+		let tmpValue = this.preciseOperand(pValue);
 
 		let tmpResult = Math.floor(tmpValue);
 		return tmpResult.toString();
@@ -400,7 +421,7 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	ceilPrecise(pValue)
 	{
-		let tmpValue = isNaN(pValue) ? 0 : pValue;
+		let tmpValue = this.preciseOperand(pValue);
 
 		let tmpResult = Math.ceil(tmpValue);
 		return tmpResult.toString();
@@ -415,8 +436,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	comparePrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		return tmpLeftArbitraryValue.cmp(tmpRightValue);
@@ -432,8 +453,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	comparePreciseWithin(pLeftValue, pRightValue, pEpsilon)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		const diff = tmpLeftArbitraryValue.minus(tmpRightValue).abs();
@@ -457,8 +478,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	gtPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		return tmpLeftArbitraryValue.gt(tmpRightValue);
@@ -474,8 +495,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	gtePrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		return tmpLeftArbitraryValue.gte(tmpRightValue);
@@ -490,8 +511,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	ltPrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		return tmpLeftArbitraryValue.lt(tmpRightValue);
@@ -506,8 +527,8 @@ class FableServiceMath extends libFableServiceBase
 	 */
 	ltePrecise(pLeftValue, pRightValue)
 	{
-		let tmpLeftValue = isNaN(pLeftValue) ? 0 : pLeftValue;
-		let tmpRightValue = isNaN(pRightValue) ? 0 : pRightValue;
+		let tmpLeftValue = this.preciseOperand(pLeftValue);
+		let tmpRightValue = this.preciseOperand(pRightValue);
 
 		let tmpLeftArbitraryValue = new this.bigNumber(tmpLeftValue);
 		return tmpLeftArbitraryValue.lte(tmpRightValue);

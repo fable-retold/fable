@@ -146,6 +146,27 @@ suite
 							);
 						test
 							(
+								'An emptied operand counts as 0, so the result is never false',
+								(fDone) =>
+								{
+									let _Parser = getExpressionParser();
+
+									for (const tmpEmpty of [ '', '  ', null ])
+									{
+										let tmpResultObject = {};
+										let tmpDataObject = { X: 5, Y: tmpEmpty, Z: 75 };
+										let tmpDestinationObject = {};
+
+										Expect(_Parser.solve('Area = X * Y * Z', tmpDataObject, tmpResultObject, false, tmpDestinationObject)).to.equal('0');
+										Expect(tmpDestinationObject.Area).to.equal('0');
+										Expect(_Parser.solve('Total = X + Y', tmpDataObject, tmpResultObject, false, tmpDestinationObject)).to.equal('5');
+									}
+
+									return fDone();
+								}
+							);
+						test
+							(
 								'Capture array -> number bug',
 								(fDone) =>
 								{

@@ -695,5 +695,34 @@ suite
 				);
 			}
 		);
+		suite
+		(
+			'Empty Operands',
+			function()
+			{
+				test
+				(
+					'Empty, whitespace-only, null, undefined and false operands count as 0',
+					function()
+					{
+						let testFable = new libFable();
+
+						for (const tmpEmpty of [ '', '   ', null, undefined, false ])
+						{
+							Expect(testFable.Math.addPrecise(tmpEmpty, 2)).to.equal('2');
+							Expect(testFable.Math.subtractPrecise(5, tmpEmpty)).to.equal('5');
+							Expect(testFable.Math.multiplyPrecise(3, tmpEmpty)).to.equal('0');
+							Expect(testFable.Math.multiplyPrecise(tmpEmpty, '15.50')).to.equal('0');
+							Expect(testFable.Math.dividePrecise(tmpEmpty, 4)).to.equal('0');
+							Expect(testFable.Math.comparePrecise(tmpEmpty, 0)).to.equal(0);
+							Expect(testFable.Math.roundPrecise(tmpEmpty, 2)).to.equal('0');
+							Expect(testFable.Math.toFixedPrecise(tmpEmpty, 2)).to.equal('0.00');
+						}
+						Expect(testFable.Math.multiplyPrecise(' 2 ', '3')).to.equal('6');
+						Expect(testFable.Math.powerPrecise(2, '')).to.equal('1');
+					}
+				);
+			}
+		);
 	}
 );
