@@ -169,6 +169,19 @@ Internally, `condition ? trueValue :: falseValue` is desugared to `ternary((cond
 
 ### Order of Operations
 
+Parentheses and function calls are solved first. Operators then bind in this order, tightest first; operators in the same row are evaluated left to right.
+
+| Order | Operators | Notes |
+|-------|-----------|-------|
+| 1 | unary `-`, unary `+` | `-2 ^ 2` is `(-2) ^ 2` -> `'4'` (the usual math convention would give `-4`) |
+| 2 | `^` | Left-associative: `2 ^ 3 ^ 2` is `(2 ^ 3) ^ 2` -> `'64'` |
+| 3 | `*` `/` `%` | |
+| 4 | `+` `-` | |
+| 5 | `>` `>=` `<` `<=` `==` `!=` | |
+| 6 | `,` | Separates function arguments |
+
+Each function argument is a full expression, so `IF(X, ">", 0, X * Y + X, 0)` returns the value of `X * Y + X`.
+
 ```javascript
 const libFable = require('fable');
 const fable = new libFable({ Product: 'ExpressionParserDemo', ProductVersion: '1.0.0' });
@@ -177,6 +190,8 @@ const parser = fable.instantiateServiceProviderIfNotExists('ExpressionParser');
 console.log(parser.solve('5 + 2 * 10'));           // Returns '25'
 console.log(parser.solve('3.5 + 5 + 10 * 10 / 5'));  // Returns '28.5'
 console.log(parser.solve('(100 - 10)'));           // Returns '90'
+console.log(parser.solve('1 + 2 ^ 2 * 3'));        // Returns '13'
+console.log(parser.solve('2 - -3 * 2'));           // Returns '8'
 ```
 
 ### Negative Numbers

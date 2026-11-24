@@ -71,6 +71,11 @@ PreciseEquals = If("1.0000000001", "===", "1", "yes", "no")
 ```expression
 // Return values can be expressions
 Computed = If(AppData.Cities[0].latitude, "<", "50", AppData.Cities[0].latitude + 25, AppData.Cities[0].latitude - 25)
+
+// Every argument is a full expression with the normal order of operations
+// With X = 3 and Y = 4: X * Y + X = 15
+Total = IF(X, ">", 0, X * Y + X, 0)
+// Result: "15"
 ```
 
 ### Nested Conditions

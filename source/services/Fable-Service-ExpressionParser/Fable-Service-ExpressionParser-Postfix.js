@@ -26,43 +26,168 @@ class ExpressionParserPostfix extends libExpressionParserOperationBase
 		 * The reason we are doing it as such is to show exactly how the
 		 * solver resolves the passed-in tokens into a solvable expression.
 		 */
-		if (!tmpOperation.LeftValue.VirtualSymbolName)
+		// An operand bound to another operation's result (see resolveSolveLayerOperands) reads that virtual symbol.
+		if ('LeftVirtualSymbolName' in tmpOperation.Operation)
+		{
+			tmpOperation.LeftValue = this.getTokenContainerObject(tmpOperation.Operation.LeftVirtualSymbolName, 'Token.VirtualSymbol');
+		}
+		else if (!tmpOperation.LeftValue.VirtualSymbolName)
 		{
 			tmpOperation.LeftValue.VirtualSymbolName = tmpOperation.VirtualSymbolName;
 		}
 		else
 		{
 			// We need to set the left value to a virtual symbol instead of the looked up value if it's already used in another operation
-			if ('LeftVirtualSymbolName' in tmpOperation.Operation)
-			{
-				tmpOperation.LeftValue = this.getTokenContainerObject(tmpOperation.Operation.LeftVirtualSymbolName, 'Token.VirtualSymbol');
-			}
-			else
-			{
-				tmpOperation.LeftValue = this.getTokenContainerObject(tmpOperation.LeftValue.VirtualSymbolName, 'Token.VirtualSymbol');
-			}
+			tmpOperation.LeftValue = this.getTokenContainerObject(tmpOperation.LeftValue.VirtualSymbolName, 'Token.VirtualSymbol');
 		}
-		if (!tmpOperation.RightValue.VirtualSymbolName)
+		if ('RightVirtualSymbolName' in tmpOperation.Operation)
+		{
+			tmpOperation.RightValue = this.getTokenContainerObject(tmpOperation.Operation.RightVirtualSymbolName, 'Token.VirtualSymbol');
+		}
+		else if (!tmpOperation.RightValue.VirtualSymbolName)
 		{
 			tmpOperation.RightValue.VirtualSymbolName = tmpOperation.VirtualSymbolName;
 		}
 		else
 		{
 			// We need to set the right value to a virtual symbol instead of the looked up value if it's already used in another operation
-			//if ('LeftVirtualSymbolName' in tmpOperation.RightValue)
-			if ('RightVirtualSymbolName' in tmpOperation.Operation)
-			{
-				tmpOperation.RightValue = this.getTokenContainerObject(tmpOperation.Operation.RightVirtualSymbolName, 'Token.VirtualSymbol');
-			}
-			else
-			{
-				tmpOperation.RightValue = this.getTokenContainerObject(tmpOperation.RightValue.VirtualSymbolName, 'Token.VirtualSymbol');
-			}
+			tmpOperation.RightValue = this.getTokenContainerObject(tmpOperation.RightValue.VirtualSymbolName, 'Token.VirtualSymbol');
 		}
 
 		tmpOperation.Operation.Parsed = true;
 
 		return tmpOperation;
+	}
+
+	/**
+	 * Parse one solve layer with precedence climbing and bind each binary operator to its operands.
+	 *
+	 * Within a layer, a parenthesis group is a `(` `)` pair (its contents live in a deeper layer) and a
+	 * function call is a function token followed by such a pair.  Operators bind left-associatively, and
+	 * a lower Precedence number binds tighter.  Unary + and - (Precedence 1 by this point) bind to the
+	 * operand that follows them.
+	 *
+	 * Each binary operator gets either `<Side>VirtualSymbolName` (the operand is another binary
+	 * operation's result) or `<Side>OperandToken` (the token that stands for the operand).  When the
+	 * layer does not parse, every binding is removed and the solve list falls back to adjacent tokens.
+	 *
+	 * @param {Array<Object>} pSolveLayerTokens - The token objects in one solve layer, in expression order.
+	 * @return {{ Token: Object, IsOperation: boolean, IsBinary?: boolean } | false} - The operand the whole layer reduces to, or false.
+	 */
+	resolveSolveLayerOperands(pSolveLayerTokens)
+	{
+		let tmpIndex = 0;
+
+		const fIsOperator = (pToken) =>
+		{
+			return pToken && (pToken.Type === 'Token.Operator');
+		};
+		const fIsUnaryOperator = (pToken) =>
+		{
+			return fIsOperator(pToken) && (pToken.Descriptor.Precedence === 1) && ((pToken.Token === '-') || (pToken.Token === '+'));
+		};
+		const fIsParenthesis = (pToken, pParenthesis) =>
+		{
+			return pToken && (pToken.Type === 'Token.Parenthesis') && (pToken.Token === pParenthesis);
+		};
+
+		const fParseOperand = () =>
+		{
+			let tmpToken = pSolveLayerTokens[tmpIndex];
+			if (!tmpToken)
+			{
+				return false;
+			}
+			if (fIsUnaryOperator(tmpToken))
+			{
+				tmpIndex++;
+				let tmpOperand = fParseOperand();
+				if (!tmpOperand)
+				{
+					return false;
+				}
+				// A unary + is dropped from the solve list, so it stands for its operand.
+				if (tmpToken.Token === '+')
+				{
+					return tmpOperand;
+				}
+				return { Token: tmpToken, IsOperation: true };
+			}
+			if (tmpToken.Type === 'Token.Function')
+			{
+				if (!fIsParenthesis(pSolveLayerTokens[tmpIndex + 1], '(') || !fIsParenthesis(pSolveLayerTokens[tmpIndex + 2], ')'))
+				{
+					return false;
+				}
+				tmpIndex += 3;
+				return { Token: tmpToken, IsOperation: true };
+			}
+			if (fIsParenthesis(tmpToken, '('))
+			{
+				if (!fIsParenthesis(pSolveLayerTokens[tmpIndex + 1], ')'))
+				{
+					return false;
+				}
+				tmpIndex += 2;
+				return { Token: tmpToken, IsOperation: false };
+			}
+			if (fIsOperator(tmpToken) || (tmpToken.Type === 'Token.Parenthesis'))
+			{
+				return false;
+			}
+			tmpIndex++;
+			return { Token: tmpToken, IsOperation: false };
+		};
+
+		const fBindOperand = (pOperator, pSide, pOperand) =>
+		{
+			if (pOperand.IsBinary)
+			{
+				pOperator[`${pSide}VirtualSymbolName`] = pOperand.Token.VirtualSymbolName;
+			}
+			else
+			{
+				pOperator[`${pSide}OperandToken`] = pOperand.Token;
+			}
+		};
+
+		const fParseExpression = (pMaxPrecedence) =>
+		{
+			let tmpLeft = fParseOperand();
+			if (!tmpLeft)
+			{
+				return false;
+			}
+			while ((tmpIndex < pSolveLayerTokens.length) && fIsOperator(pSolveLayerTokens[tmpIndex]) && !fIsUnaryOperator(pSolveLayerTokens[tmpIndex]) &&
+				(pSolveLayerTokens[tmpIndex].Descriptor.Precedence <= pMaxPrecedence))
+			{
+				let tmpOperator = pSolveLayerTokens[tmpIndex];
+				tmpIndex++;
+				let tmpRight = fParseExpression(tmpOperator.Descriptor.Precedence - 1);
+				if (!tmpRight)
+				{
+					return false;
+				}
+				fBindOperand(tmpOperator, 'Left', tmpLeft);
+				fBindOperand(tmpOperator, 'Right', tmpRight);
+				tmpLeft = { Token: tmpOperator, IsOperation: true, IsBinary: true };
+			}
+			return tmpLeft;
+		};
+
+		let tmpRoot = fParseExpression(Infinity);
+		if (!tmpRoot || (tmpIndex < pSolveLayerTokens.length))
+		{
+			for (let i = 0; i < pSolveLayerTokens.length; i++)
+			{
+				delete pSolveLayerTokens[i].LeftVirtualSymbolName;
+				delete pSolveLayerTokens[i].RightVirtualSymbolName;
+				delete pSolveLayerTokens[i].LeftOperandToken;
+				delete pSolveLayerTokens[i].RightOperandToken;
+			}
+			return false;
+		}
+		return tmpRoot;
 	}
 
 	buildPostfixedSolveList(pTokenizedExpression, pResultObject)
@@ -135,7 +260,8 @@ class ExpressionParserPostfix extends libExpressionParserOperationBase
 		let tmpVirtualParenthesisIndex = 0;
 		let tmpSolveLayerStack = [];
 		// Kick off the solve layer stack with the first solve set identifier
-		tmpSolveLayerStack.push(`SolveSet_${tmpVirtualParenthesisIndex}_D_${tmpDepth}`);
+		const tmpRootSolveLayer = `SolveSet_${tmpVirtualParenthesisIndex}_D_${tmpDepth}`;
+		tmpSolveLayerStack.push(tmpRootSolveLayer);
 		for (let i = 0; i < tmpResults.PostfixTokenObjects.length; i++)
 		{
 			// 1. If it's an open parenthesis, set the parenthesis at the current depth and increment the depth
@@ -427,182 +553,43 @@ class ExpressionParserPostfix extends libExpressionParserOperationBase
 			}
 		}
 
-		// X. Postprocess the parenthesis groups to ensure they respect the order of operations for their boundaries
+		// 5.2: Bind every binary operator in each layer to the operands order of operations gives it.
+		let tmpSolveLayerRootMap = {};
 		for (let tmpSolveLayerIndex = 0; tmpSolveLayerIndex < tmpSolveLayerKeys.length; tmpSolveLayerIndex++)
 		{
-			let tmpParenthesisStack = [];
-			let tmpLastOperator = false;
-
-			let tmpSolveLayerTokens = tmpSolveLayerMap[tmpSolveLayerKeys[tmpSolveLayerIndex]];
-			for (let i = 0; i < tmpSolveLayerTokens.length; i++)
-			{
-				let tmpPostfixTokenObject = tmpSolveLayerTokens[i];
-
-				// Keep track of the last operator
-				if (tmpPostfixTokenObject.Type === 'Token.Operator')
-				{
-					tmpLastOperator = tmpPostfixTokenObject;
-				}
-
-				// This is only important to do at the close parenthesis.
-				if (tmpPostfixTokenObject.Type === 'Token.Function')
-				{
-					tmpPostfixTokenObject.PreviousOperator = tmpLastOperator;
-				}
-				else if ((tmpPostfixTokenObject.Type === 'Token.Parenthesis') && (tmpPostfixTokenObject.Token === '(') && tmpPostfixTokenObject.IsFunction)
-				{
-					tmpParenthesisStack.push(tmpPostfixTokenObject);
-					if (tmpPostfixTokenObject.Function.PreviousOperator)
-					{
-						tmpPostfixTokenObject.PreviousOperator = tmpPostfixTokenObject.Function.PreviousOperator;
-					}
-				}
-				else if ((tmpPostfixTokenObject.Type === 'Token.Parenthesis') && (tmpPostfixTokenObject.Token === '('))
-				{
-					tmpPostfixTokenObject.PreviousOperator = tmpLastOperator;
-					tmpParenthesisStack.push(tmpPostfixTokenObject);
-				}
-				else if ((tmpPostfixTokenObject.Type === 'Token.Parenthesis') && (tmpPostfixTokenObject.Token === ')'))
-				{
-					// This is ultra complex, and binds the order of operations logic to the open parenthesis for the group
-					let tmpOpenParenthesis = tmpParenthesisStack.pop();
-					if (i < tmpSolveLayerTokens.length - 1)
-					{
-						for (let j = i + 1; j < tmpSolveLayerTokens.length; j++)
-						{
-							if (tmpSolveLayerTokens[j].Type === 'Token.Operator')
-							{
-								tmpOpenParenthesis.NextOperator = tmpSolveLayerTokens[j];
-								break;
-							}
-						}
-					}
-					if (!tmpOpenParenthesis)
-					{
-						tmpResults.ExpressionParserLog.push(`ERROR: ExpressionParser.buildPostfixedSolveList found a closing parenthesis at token index ${i} with no corresponding opening parenthesis.`);
-						continue;
-					}
-
-					if (tmpOpenParenthesis.PreviousOperator && tmpOpenParenthesis.NextOperator)
-					{
-						if (tmpOpenParenthesis.PreviousOperator.Descriptor.Precedence <= tmpOpenParenthesis.NextOperator.Descriptor.Precedence)
-						{
-							tmpOpenParenthesis.NextOperator.LeftVirtualSymbolName = tmpOpenParenthesis.PreviousOperator.VirtualSymbolName;
-						}
-						else
-						{
-							tmpOpenParenthesis.PreviousOperator.RightVirtualSymbolName = tmpOpenParenthesis.NextOperator.VirtualSymbolName;
-						}
-					}
-				}
-				else
-				{
-					if (!('SolveLayerStack' in tmpPostfixTokenObject))
-					{
-						// Decorate the solve layer stack for the token
-						if (tmpParenthesisStack.length > 0)
-						{
-							tmpPostfixTokenObject.SolveLayerStack = tmpParenthesisStack[tmpParenthesisStack.length-1].SolveLayerStack;
-						}
-						else
-						{
-							tmpPostfixTokenObject.SolveLayerStack = 'Expression_Root';
-						}
-					}
-				}
-			}
-		}
-
-		// 5.2.9: Make sure the affinity of operators is respecting order of operations.
-		//        Walk backwards and forwards, hoisting same value precedence backwards/forwards
-		//        across each layer... the precedence change needs to be decreasing to matter
-		for (let tmpSolveLayerIndex = 0; tmpSolveLayerIndex < tmpSolveLayerKeys.length; tmpSolveLayerIndex++)
-		{
-			let tmpLastPrecedence = false;
-			let tmpFinalChainToken = false;
-			let tmpSolveLayerTokens = tmpSolveLayerMap[tmpSolveLayerKeys[tmpSolveLayerIndex]];
-
-			for (let i = tmpSolveLayerTokens.length-1; i >= 0; i--)
-			{
-				let tmpToken = tmpSolveLayerTokens[i];
-
-				if (tmpToken.Type === 'Token.Operator')
-				{
-					if (!tmpFinalChainToken)
-					{
-						tmpFinalChainToken = tmpToken;
-					}
-					else if (tmpToken.Descriptor.Precedence > tmpLastPrecedence)
-					{
-						// This is less imporant than the last precedence, so hoist back the virtual value
-						tmpToken.RightVirtualSymbolName = tmpFinalChainToken.VirtualSymbolName;
-						//console.log(`Hoisting ${tmpToken.Token} back to ${tmpFinalChainToken.Token}`);
-						tmpFinalChainToken = tmpToken;
-					}
-					else if (tmpToken.Descriptor.Precedence < tmpLastPrecedence)
-					{
-						tmpFinalChainToken = tmpToken;
-					}
-					tmpLastPrecedence = tmpToken.Descriptor.Precedence;
-				}
-			}
-			let tmpDecreasingPrecedenceStack = [];
-			let tmpLastToken = false;
-			for (let i = tmpSolveLayerTokens.length-1; i >= 0; i--)
-			{
-				let tmpToken = tmpSolveLayerTokens[i];
-
-				if (tmpToken.Type === 'Token.Operator')
-				{
-					if (!tmpLastToken)
-					{
-						tmpLastToken = tmpToken;
-					}
-					else if (tmpToken.Descriptor.Precedence > tmpLastPrecedence)
-					{
-						// Check and see if this needs to be resolved in the stack
-						if (tmpDecreasingPrecedenceStack.length > 0)
-						{
-							for (let j = tmpDecreasingPrecedenceStack.length-1; j >= 0; j--)
-							{
-								if (tmpDecreasingPrecedenceStack[j].Descriptor.Precedence >= tmpToken.Descriptor.Precedence)
-								{
-									//console.log(`Hoisting ${tmpDecreasingPrecedenceStack[j].Token} up to ${tmpToken.Token}`);
-									tmpDecreasingPrecedenceStack[j].LeftVirtualSymbolName = tmpToken.VirtualSymbolName;
-									tmpDecreasingPrecedenceStack.slice(j, 1);
-									break;
-								}
-							}
-						}
-						tmpLastToken = tmpToken;
-					}
-					else if (tmpToken.Descriptor.Precedence < tmpLastPrecedence)
-					{
-						tmpDecreasingPrecedenceStack.push(tmpLastToken);
-						tmpLastToken = tmpToken;
-					}
-					tmpLastPrecedence = tmpToken.Descriptor.Precedence;
-				}
-			}
+			tmpSolveLayerRootMap[tmpSolveLayerKeys[tmpSolveLayerIndex]] = this.resolveSolveLayerOperands(tmpSolveLayerMap[tmpSolveLayerKeys[tmpSolveLayerIndex]]);
 		}
 
 		// 5.3: Generate the Postfix Solve List
 		for (let tmpSolveLayerIndex = 0; tmpSolveLayerIndex < tmpSolveLayerKeys.length; tmpSolveLayerIndex++)
 		{
 			let tmpSolveLayerTokens = tmpSolveLayerMap[tmpSolveLayerKeys[tmpSolveLayerIndex]];
+			let tmpSolveLayerRoot = tmpSolveLayerRootMap[tmpSolveLayerKeys[tmpSolveLayerIndex]];
 
-			// If this is a layer with one value, presume it's an assignment.
+			// A layer that is one plain value or one parenthesis group (with no operation of its own) is an assignment.
+			// The root layer needs none for a group: the group's own last step is already the final result.
+			let tmpSoleOperandToken = false;
 			if (tmpSolveLayerTokens.length === 1)
+			{
+				tmpSoleOperandToken = tmpSolveLayerTokens[0];
+			}
+			else if (tmpSolveLayerRoot && !tmpSolveLayerRoot.IsOperation &&
+				!((tmpSolveLayerKeys[tmpSolveLayerIndex] === tmpRootSolveLayer) && (tmpSolveLayerRoot.Token.Type === 'Token.Parenthesis')))
+			{
+				tmpSoleOperandToken = tmpSolveLayerRoot.Token;
+			}
+
+			if (tmpSoleOperandToken)
 			{
 				// TODO: I think this is correct but with the addition of multiple assignment operators it's less clear.
 				let tmpAbstractAssignToken = this.getTokenContainerObject('=');
-				tmpAbstractAssignToken.VirtualSymbolName = tmpResults.PostfixLayerstackMap[tmpSolveLayerTokens[0].SolveLayerStack];
+				tmpAbstractAssignToken.VirtualSymbolName = tmpResults.PostfixLayerstackMap[tmpSolveLayerKeys[tmpSolveLayerIndex]];
 				// If this doesn't have a matching solvelayerstack, get the virtual symbol name from the parenthesis group it's in
 				if (!tmpAbstractAssignToken.VirtualSymbolName)
 				{
 					for (let i = 0; i < tmpResults.PostfixTokenObjects.length; i++)
 					{
-						if (tmpResults.PostfixTokenObjects[i].ParenthesisStack === tmpSolveLayerTokens[0].SolveLayerStack)
+						if (tmpResults.PostfixTokenObjects[i].ParenthesisStack === tmpSolveLayerKeys[tmpSolveLayerIndex])
 						{
 							tmpAbstractAssignToken.VirtualSymbolName = tmpResults.PostfixTokenObjects[i].VirtualSymbolName;
 							break;
@@ -614,7 +601,7 @@ class ExpressionParserPostfix extends libExpressionParserOperationBase
 					tmpAbstractAssignToken.VirtualSymbolName = `V_SingleValue_${tmpVirtualSymbolIndex}`;
 					tmpVirtualSymbolIndex++;
 				}
-				tmpResults.PostfixSolveList.push(this.getPosfixSolveListOperation(tmpAbstractAssignToken, tmpSolveLayerTokens[0], this.getTokenContainerObject('0.0')));
+				tmpResults.PostfixSolveList.push(this.getPosfixSolveListOperation(tmpAbstractAssignToken, tmpSoleOperandToken, this.getTokenContainerObject('0.0')));
 				continue;
 			}
 
@@ -623,8 +610,10 @@ class ExpressionParserPostfix extends libExpressionParserOperationBase
 			{
 				// Enumerate all tokens in a layer's expression.
 				// There is a recursive way to do this, but given the short length of even the most complex equations we're favoring readability.
-				for (let i = 0; i < tmpSolveLayerTokens.length; i++)
+				for (let tmpTokenIndex = 0; tmpTokenIndex < tmpSolveLayerTokens.length; tmpTokenIndex++)
 				{
+					// Unary operators (Precedence 1) solve right to left, so in a chain like `- -X` the inner one is solved first.
+					let i = (tmpPrecedence === 1) ? (tmpSolveLayerTokens.length - 1 - tmpTokenIndex) : tmpTokenIndex;
 					// If the token is an operator and at the current precedence, add it to the postfix solve list and mutate the array.
 					if ((tmpSolveLayerTokens[i].Type === 'Token.Operator') &&
 						(tmpSolveLayerTokens[i].Descriptor.Precedence === tmpPrecedence))
@@ -661,7 +650,9 @@ class ExpressionParserPostfix extends libExpressionParserOperationBase
 						// Finally add the dang thing.
 						else
 						{
-							tmpResults.PostfixSolveList.push(this.getPosfixSolveListOperation(tmpToken, tmpSolveLayerTokens[i-1], tmpSolveLayerTokens[i+1], tmpSolveLayerTokens, i));
+							let tmpLeftOperandToken = ('LeftOperandToken' in tmpToken) ? tmpToken.LeftOperandToken : tmpSolveLayerTokens[i-1];
+							let tmpRightOperandToken = ('RightOperandToken' in tmpToken) ? tmpToken.RightOperandToken : tmpSolveLayerTokens[i+1];
+							tmpResults.PostfixSolveList.push(this.getPosfixSolveListOperation(tmpToken, tmpLeftOperandToken, tmpRightOperandToken, tmpSolveLayerTokens, i));
 						}
 					}
 					else if ((tmpSolveLayerTokens[i].Type === 'Token.Function') && (tmpPrecedence === 0))
